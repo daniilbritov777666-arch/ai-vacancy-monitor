@@ -7,7 +7,7 @@ from typing import Callable
 from vacancy_monitor.config import Config
 from vacancy_monitor.filtering import evaluate_post, format_match_message
 from vacancy_monitor.models import Post
-from vacancy_monitor.sources import fetch_channel_posts
+from vacancy_monitor.sources import fetch_channel_posts, fetch_rss_posts as fetch_rss_feed_posts
 from vacancy_monitor.state import SeenState
 from vacancy_monitor.telegram import send_telegram_message
 
@@ -24,8 +24,10 @@ class MonitorSummary:
 def run_monitor(
     *,
     channels: list[str],
+    rss_feeds: list[str] | None = None,
     state_path: Path,
     fetch_posts: Callable[[str], list[Post]],
+    fetch_rss_posts: Callable[[str], list[Post]] | None = None,
     send_message: Callable[[str], None],
     send_first_run: bool,
 ) -> MonitorSummary:
@@ -38,12 +40,16 @@ def run_monitor(
     seeded = 0
     errors = 0
 
-    for channel in channels:
+    sources = [(channel, fetch_posts) for channel in channels]
+    if rss_feeds and fetch_rss_posts:
+        sources.extend((feed, fetch_rss_posts) for feed in rss_feeds)
+
+    for source, fetcher in sources:
         try:
-            posts = fetch_posts(channel)
+            posts = fetcher(source)
         except Exception as exc:
             errors += 1
-            print(f"Failed to fetch {channel}: {exc}")
+            print(f"Failed to fetch {source}: {exc}")
             continue
 
         for post in reversed(posts):
@@ -74,8 +80,10 @@ def main() -> int:
     config = Config.from_env()
     summary = run_monitor(
         channels=config.channels,
+        rss_feeds=config.rss_feeds,
         state_path=config.state_path,
         fetch_posts=fetch_channel_posts,
+        fetch_rss_posts=fetch_rss_feed_posts,
         send_message=lambda text: send_telegram_message(config.bot_token, config.chat_id, text),
         send_first_run=config.send_first_run,
     )

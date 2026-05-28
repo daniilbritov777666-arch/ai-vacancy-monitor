@@ -9,6 +9,12 @@ DEFAULT_CHANNELS = [
     "mari_vakansii",
     "digitaltender",
     "FreeVacanciesIT",
+    "rueventjob",
+]
+
+DEFAULT_RSS_FEEDS = [
+    "https://www.fl.ru/rss/projects.xml",
+    "https://freelancehunt.com/projects.rss",
 ]
 
 
@@ -17,6 +23,7 @@ class Config:
     bot_token: str
     chat_id: str
     channels: list[str]
+    rss_feeds: list[str]
     state_path: Path
     send_first_run: bool
 
@@ -25,6 +32,7 @@ class Config:
         bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
         chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
         channels = _csv(os.environ.get("TELEGRAM_CHANNELS")) or DEFAULT_CHANNELS
+        rss_feeds = _csv(os.environ.get("RSS_FEEDS")) or DEFAULT_RSS_FEEDS
         state_path = Path(os.environ.get("STATE_PATH", "data/seen_posts.json"))
         send_first_run = os.environ.get("SEND_FIRST_RUN", "").lower() in {"1", "true", "yes"}
 
@@ -37,6 +45,7 @@ class Config:
             bot_token=bot_token,
             chat_id=chat_id,
             channels=channels,
+            rss_feeds=rss_feeds,
             state_path=state_path,
             send_first_run=send_first_run,
         )

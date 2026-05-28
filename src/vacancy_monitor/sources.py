@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from email.utils import parsedate_to_datetime
+from xml.etree import ElementTree
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,6 +22,16 @@ def fetch_channel_posts(channel: str) -> list[Post]:
     )
     response.raise_for_status()
     return parse_telegram_html(channel.lstrip("@"), response.text)
+
+
+def fetch_rss_posts(feed_url: str) -> list[Post]:
+    response = requests.get(
+        feed_url,
+        timeout=DEFAULT_TIMEOUT_SECONDS,
+        headers={"User-Agent": "Mozilla/5.0 vacancy-monitor/0.1"},
+    )
+    response.raise_for_status()
+    return parse_rss_xml(_rss_source_name(feed_url), response.text)
 
 
 def parse_telegram_html(source: str, html: str) -> list[Post]:
@@ -51,5 +63,55 @@ def parse_telegram_html(source: str, html: str) -> list[Post]:
     return posts
 
 
+def parse_rss_xml(source: str, xml: str) -> list[Post]:
+    root = ElementTree.fromstring(xml)
+    posts: list[Post] = []
+
+    for item in root.findall(".//item"):
+        title = _xml_text(item, "title")
+        link = _xml_text(item, "link")
+        description = _html_to_text(_xml_text(item, "description"))
+        guid = _xml_text(item, "guid") or link or title
+        pub_date = _xml_text(item, "pubDate")
+        published_at = _parse_pub_date(pub_date)
+
+        if not title or not link:
+            continue
+
+        posts.append(
+            Post(
+                source=source,
+                post_id=f"{source}:{guid}",
+                url=link,
+                text=f"{title}\n{description}".strip(),
+                published_at=published_at,
+            )
+        )
+
+    return posts
+
+
 def newest_first(posts: Iterable[Post]) -> list[Post]:
     return sorted(posts, key=lambda post: post.post_id, reverse=True)
+
+
+def _xml_text(item: ElementTree.Element, name: str) -> str:
+    node = item.find(name)
+    return "".join(node.itertext()).strip() if node is not None else ""
+
+
+def _html_to_text(html: str) -> str:
+    return BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
+
+
+def _parse_pub_date(value: str) -> str | None:
+    if not value:
+        return None
+    try:
+        return parsedate_to_datetime(value).isoformat()
+    except (TypeError, ValueError):
+        return value
+
+
+def _rss_source_name(feed_url: str) -> str:
+    return feed_url.replace("https://", "").replace("http://", "").strip("/")
