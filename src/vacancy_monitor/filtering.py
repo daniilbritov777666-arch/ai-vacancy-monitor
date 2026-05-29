@@ -5,17 +5,56 @@ import re
 from vacancy_monitor.models import MatchResult, Post
 
 
-POSITIVE_KEYWORDS = {
-    "лендинг": ["лендинг", "landing", "tilda", "таплинк", "taplink", "сайт", "webflow"],
-    "telegram": ["telegram бот", "тг бот", "бот", "mini app", "мини апп", "miniapp"],
-    "автоматизация": ["автоматизац", "zapier", "make.com", "n8n", "интеграц", "парсинг", "скрипт"],
-    "crm": ["crm", "битрикс", "bitrix", "amo", "воронк", "робот", "триггер"],
-    "контент": ["копирайт", "seo", "текст", "пост", "контент", "сценари", "статья"],
-    "дизайн": ["дизайн", "инфограф", "карточк", "canva", "figma", "аватар", "обложк"],
-    "нейросети": ["нейросет", "chatgpt", "gpt", "ai", "ии", "midjourney", "stable diffusion"],
-    "монтаж": ["reels", "shorts", "монтаж", "видео", "субтитр"],
-    "таблицы": ["google sheets", "excel", "таблиц", "дашборд", "отчет"],
-    "можно без глубокого кода": ["без сложного кода", "без кода", "быстро собрать", "простая задача"],
+POSITIVE_PATTERNS = {
+    "сайты/лендинги": [
+        r"\bлендинг",
+        r"\blanding\b",
+        r"tilda|тильд",
+        r"wordpress|вордпресс",
+        r"webflow",
+        r"taplink|таплинк",
+        r"\bсайт\b",
+    ],
+    "боты": [
+        r"telegram[-\s]?бот",
+        r"тг[-\s]?бот",
+        r"чат[-\s]?бот",
+        r"\bбот(а|ов|ы)?\b",
+        r"mini\s?app|miniapp|мини[-\s]?апп",
+    ],
+    "автоматизация/интеграции": [
+        r"автоматизац",
+        r"интеграц",
+        r"\bapi\b",
+        r"webhook",
+        r"zapier",
+        r"make\.com",
+        r"\bn8n\b",
+        r"парсер|парсинг",
+        r"скрипт",
+    ],
+    "crm/no-code": [
+        r"\bcrm\b",
+        r"битрикс|bitrix",
+        r"\bamo\b|amocrm",
+        r"воронк",
+        r"робот",
+        r"триггер",
+    ],
+    "таблицы/дашборды": [
+        r"google sheets",
+        r"\bexcel\b",
+        r"таблиц",
+        r"формул",
+        r"макрос",
+        r"дашборд|dashboard",
+    ],
+    "можно без глубокого кода": [
+        r"без сложного кода",
+        r"без кода",
+        r"быстро собрать",
+        r"простая задача",
+    ],
 }
 
 NEGATIVE_PATTERNS = {
@@ -29,6 +68,46 @@ NEGATIVE_PATTERNS = {
         r"опыт\s+\d+\+?\s*(лет|года|год)",
         r"kubernetes",
         r"highload",
+    ],
+    "долгосрочная занятость": [
+        r"постоянн",
+        r"долгосроч",
+        r"\b5/2\b",
+        r"полная занятость",
+        r"частичная занятость",
+        r"оклад",
+        r"в штат",
+        r"ежемесячн",
+        r"каждый месяц",
+        r"постоянная поддержка",
+        r"вести на постоянной поддержке",
+    ],
+    "контент/smm/маркетинг": [
+        r"\bsmm\b",
+        r"копирайт",
+        r"контент",
+        r"контент[-\s]?план",
+        r"пост(ы|ов)?\b",
+        r"стать[ьяи]",
+        r"сценари",
+        r"\bseo\b",
+        r"маркетолог|маркетинг",
+        r"таргет",
+        r"\bads\b",
+        r"рекламн(ая|ые|ых|ую) кампани",
+        r"авитолог",
+        r"reels|shorts",
+        r"монтаж",
+        r"\bвидео\b",
+        r"субтитр",
+        r"презентац",
+        r"дизайн",
+        r"баннер",
+        r"логотип",
+        r"инфограф",
+        r"карточк",
+        r"\bfigma\b",
+        r"\bcanva\b",
     ],
     "нет фиксированной оплаты": [
         r"без оклада",
@@ -57,16 +136,17 @@ def evaluate_post(post: Post) -> MatchResult:
             risks.append(risk)
 
     reasons: list[str] = []
-    for reason, words in POSITIVE_KEYWORDS.items():
-        if any(word in text for word in words):
+    for reason, patterns in POSITIVE_PATTERNS.items():
+        if any(re.search(pattern, text) for pattern in patterns):
             reasons.append(reason)
 
     has_money_signal = bool(re.search(r"(\d[\d\s]{2,}\s*(₽|руб|р\.|k|к))|бюджет|оплат", text))
     if has_money_signal:
         reasons.append("есть сигнал оплаты")
 
+    has_technical_signal = any(reason != "есть сигнал оплаты" for reason in reasons)
     score = len(reasons)
-    accepted = score >= 2 and not risks
+    accepted = has_technical_signal and has_money_signal and not risks
     return MatchResult(accepted=accepted, score=score, reasons=reasons, risks=risks)
 
 
@@ -81,7 +161,7 @@ def format_match_message(post: Post, result: MatchResult) -> str:
         f"Ссылка: {post.url}\n\n"
         f"Задача:\n{preview}\n\n"
         f"Почему можно взять: {reasons}.\n\n"
-        "Что я помогу сделать: разобрать ТЗ, составить план, написать код/тексты/промпты, "
+        "Что я помогу сделать: разобрать ТЗ, составить план, написать код/настройки/автоматизацию, "
         "подготовить результат и ответ заказчику.\n\n"
         "Сколько просить: если бюджет не указан, начинай с маленького фиксированного этапа "
         "от 5 000 до 20 000 руб. в зависимости от объема.\n\n"
