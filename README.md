@@ -59,6 +59,35 @@ PYTHONPATH=src pytest -v
 TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" PYTHONPATH=src python3 -m vacancy_monitor.cli
 ```
 
+## Локальный полуавтономный агент
+
+Агент запускается на компьютере Даниила и создает папки заказов в `orders/`. Эта папка добавлена в `.gitignore`, потому что внутри будут переписка, ТЗ и клиентские материалы.
+
+Форматы первой версии:
+
+- язык сообщений и документов: русский;
+- даты: `ДД.ММ.ГГГГ HH:MM МСК`;
+- суммы: рубли;
+- первый отклик, цена, сроки, отправка результата и оплата требуют подтверждения через Telegram.
+
+Запуск одной проверки:
+
+```bash
+TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" PYTHONPATH=src python3 -m vacancy_monitor.local_agent_cli
+```
+
+Постоянный локальный режим с проверкой раз в 5 минут и обработкой Telegram-кнопок:
+
+```bash
+TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTHONPATH=src python3 -m vacancy_monitor.local_agent_cli
+```
+
+Дополнительные переменные:
+
+- `ORDERS_PATH` - папка заказов. По умолчанию `orders`.
+- `STATE_PATH` - файл просмотренных постов. По умолчанию `data/seen_posts.json`.
+- `LOCAL_AGENT_INTERVAL_SECONDS` - интервал локального цикла. По умолчанию `300`.
+
 ## Ограничения
 
 GitHub Actions schedule не гарантирует запуск ровно в секунду и не умеет чаще одного раза в 5 минут. Приватные Telegram-каналы через `t.me/s` не читаются; бот увидит только публичные веб-доступные посты.

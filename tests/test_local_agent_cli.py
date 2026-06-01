@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from vacancy_monitor.config import Config
-from vacancy_monitor.local_agent_cli import handle_order_callback, run_local_agent_once
+from vacancy_monitor.local_agent_cli import handle_order_callback, poll_telegram_once, run_local_agent_once
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
@@ -120,3 +120,36 @@ def test_handle_order_callback_rejects_stale_transition(tmp_path):
     assert updated is None
     assert store.load_order(order.order_id).status == OrderStatus.AWAITING_RESPONSE_APPROVAL
     assert answers == ["Действие уже неактуально или недоступно."]
+
+
+def test_poll_telegram_once_handles_callback_updates(tmp_path):
+    answers = []
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="sample",
+        post_id="sample/1",
+        url="https://t.me/sample/1",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+    store.save_order(order)
+    updates = [
+        {
+            "update_id": 100,
+            "callback_query": {
+                "id": "callback-1",
+                "data": f"order:approve_outreach:{order.order_id}",
+            },
+        }
+    ]
+
+    next_offset = poll_telegram_once(
+        updates=updates,
+        store=store,
+        answer_callback=lambda callback_id, text: answers.append((callback_id, text)),
+    )
+
+    assert next_offset == 101
+    assert store.load_order(order.order_id).status == OrderStatus.MANUAL_SEND_NEEDED
+    assert answers == [("callback-1", "Готово.")]

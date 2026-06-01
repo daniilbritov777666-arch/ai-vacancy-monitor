@@ -33,3 +33,16 @@ def answer_callback_query(bot_token: str, callback_query_id: str, text: str) -> 
         timeout=20,
     )
     response.raise_for_status()
+
+
+def get_updates(bot_token: str, *, offset: int | None = None, timeout_seconds: int = 20) -> list[dict]:
+    params = {"timeout": timeout_seconds, "allowed_updates": ["callback_query"]}
+    if offset is not None:
+        params["offset"] = offset
+    response = requests.get(
+        f"https://api.telegram.org/bot{bot_token}/getUpdates",
+        params=params,
+        timeout=timeout_seconds + 5,
+    )
+    response.raise_for_status()
+    return response.json().get("result", [])

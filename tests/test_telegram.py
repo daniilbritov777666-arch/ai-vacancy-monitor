@@ -1,4 +1,4 @@
-from vacancy_monitor.telegram import answer_callback_query, send_telegram_message
+from vacancy_monitor.telegram import answer_callback_query, get_updates, send_telegram_message
 
 
 class Response:
@@ -55,3 +55,26 @@ def test_answer_callback_query_posts_to_api(monkeypatch):
 
     assert calls[0]["url"].endswith("/answerCallbackQuery")
     assert calls[0]["json"]["callback_query_id"] == "callback-1"
+
+
+def test_get_updates_calls_telegram_api(monkeypatch):
+    calls = []
+
+    class UpdatesResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True, "result": [{"update_id": 10}]}
+
+    def fake_get(url, params, timeout):
+        calls.append({"url": url, "params": params, "timeout": timeout})
+        return UpdatesResponse()
+
+    monkeypatch.setattr("vacancy_monitor.telegram.requests.get", fake_get)
+
+    updates = get_updates("token", offset=9, timeout_seconds=1)
+
+    assert updates == [{"update_id": 10}]
+    assert calls[0]["url"].endswith("/getUpdates")
+    assert calls[0]["params"]["offset"] == 9

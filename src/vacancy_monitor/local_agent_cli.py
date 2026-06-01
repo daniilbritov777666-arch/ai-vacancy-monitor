@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
+from time import sleep
 
 from vacancy_monitor.agent import handle_matched_post
 from vacancy_monitor.cli import MonitorSummary, run_monitor
@@ -9,7 +11,7 @@ from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.order_models import Order
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.sources import fetch_channel_posts, fetch_rss_posts as fetch_rss_feed_posts
-from vacancy_monitor.telegram import send_telegram_message
+from vacancy_monitor.telegram import answer_callback_query, get_updates, send_telegram_message
 from vacancy_monitor.telegram_control import parse_callback_data, resolve_transition
 
 
@@ -77,8 +79,60 @@ def handle_order_callback(
     return updated
 
 
+def poll_telegram_once(
+    *,
+    updates: list[dict],
+    store: OrderStore,
+    answer_callback: Callable[[str, str], None],
+) -> int | None:
+    next_offset: int | None = None
+    for update in updates:
+        update_id = update.get("update_id")
+        if isinstance(update_id, int):
+            next_offset = update_id + 1
+
+        callback = update.get("callback_query") or {}
+        callback_id = callback.get("id")
+        callback_data = callback.get("data")
+        if not callback_id or not callback_data:
+            continue
+
+        handle_order_callback(
+            callback_data=callback_data,
+            store=store,
+            answer=lambda text, callback_id=callback_id: answer_callback(callback_id, text),
+        )
+    return next_offset
+
+
+def run_local_agent_loop(
+    config: Config,
+    *,
+    interval_seconds: int = 300,
+    poll_timeout_seconds: int = 20,
+) -> None:
+    store = OrderStore(config.orders_path)
+    offset: int | None = None
+    while True:
+        run_local_agent_once(config)
+        updates = get_updates(config.bot_token, offset=offset, timeout_seconds=poll_timeout_seconds)
+        next_offset = poll_telegram_once(
+            updates=updates,
+            store=store,
+            answer_callback=lambda callback_id, text: answer_callback_query(config.bot_token, callback_id, text),
+        )
+        if next_offset is not None:
+            offset = next_offset
+        sleep(interval_seconds)
+
+
 def main() -> int:
     config = Config.from_env()
+    if os.environ.get("LOCAL_AGENT_LOOP", "").lower() in {"1", "true", "yes"}:
+        interval_seconds = int(os.environ.get("LOCAL_AGENT_INTERVAL_SECONDS", "300"))
+        run_local_agent_loop(config, interval_seconds=interval_seconds)
+        return 0
+
     summary = run_local_agent_once(config)
     print(
         "checked={checked} matched={matched} sent={sent} seeded={seeded} errors={errors}".format(
