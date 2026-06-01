@@ -6,7 +6,7 @@ from typing import Callable
 
 from vacancy_monitor.config import Config
 from vacancy_monitor.filtering import evaluate_post, format_match_message
-from vacancy_monitor.models import Post
+from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.sources import fetch_channel_posts, fetch_rss_posts as fetch_rss_feed_posts
 from vacancy_monitor.state import SeenState
 from vacancy_monitor.telegram import send_telegram_message
@@ -30,6 +30,7 @@ def run_monitor(
     fetch_rss_posts: Callable[[str], list[Post]] | None = None,
     send_message: Callable[[str], None],
     send_first_run: bool,
+    on_match: Callable[[Post, MatchResult], None] | None = None,
 ) -> MonitorSummary:
     state = SeenState.load(state_path)
     first_run = not state_path.exists() and not state.seen_ids
@@ -58,18 +59,23 @@ def run_monitor(
 
             checked += 1
             result = evaluate_post(post)
-            state.add(post.post_id)
 
             if first_run and not send_first_run:
+                state.add(post.post_id)
                 seeded += 1
                 continue
 
             if not result.accepted:
+                state.add(post.post_id)
                 continue
 
             matched += 1
-            message = format_match_message(post, result)
-            send_message(message)
+            if on_match is not None:
+                on_match(post, result)
+            else:
+                message = format_match_message(post, result)
+                send_message(message)
+            state.add(post.post_id)
             sent += 1
 
     state.save(state_path)

@@ -26,6 +26,7 @@ class Config:
     rss_feeds: list[str]
     state_path: Path
     send_first_run: bool
+    orders_path: Path
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -35,6 +36,7 @@ class Config:
         rss_feeds = _csv(os.environ.get("RSS_FEEDS")) or DEFAULT_RSS_FEEDS
         state_path = Path(os.environ.get("STATE_PATH", "data/seen_posts.json"))
         send_first_run = os.environ.get("SEND_FIRST_RUN", "").lower() in {"1", "true", "yes"}
+        orders_path = Path(os.environ.get("ORDERS_PATH", "orders"))
 
         if not bot_token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
@@ -48,6 +50,7 @@ class Config:
             rss_feeds=rss_feeds,
             state_path=state_path,
             send_first_run=send_first_run,
+            orders_path=orders_path,
         )
 
 
