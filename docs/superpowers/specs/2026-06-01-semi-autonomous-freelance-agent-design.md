@@ -1,182 +1,197 @@
-# Semi-Autonomous Freelance Agent Design
+# Дизайн Полуавтономного Фриланс-Агента
 
-## Goal
+## Цель
 
-Extend the existing vacancy monitor into a local semi-autonomous freelance agent. The agent should find suitable one-off freelance projects, prepare outreach, support discovery with the customer, create a per-order workspace, and notify Daniil when a decision or payment action is required.
+Расширить текущий монитор вакансий до локального полуавтономного агента для разовых фриланс-заказов. Агент должен находить подходящие проекты, готовить первый отклик, помогать с уточнением ТЗ, создавать отдельную папку заказа и уведомлять Даниила, когда нужно принять решение или действие по оплате.
 
-The first version must keep Daniil in control of reputation-sensitive and financial decisions. The agent never sends the first outreach, commits to price, commits to deadlines, sends deliverables, or requests payment without explicit Telegram approval.
+Первая версия должна оставлять за Даниилом контроль над репутационно и финансово важными действиями. Агент не отправляет первый отклик, не согласует цену, не обещает сроки, не отправляет результат и не просит оплату без явного подтверждения через Telegram.
 
-## Scope
+## Формат РФ
 
-The first version supports these project categories:
+Все пользовательские тексты, документы заказа и уведомления в Telegram должны быть на русском языке.
 
-- Telegram bots.
-- Automations and parsers.
-- Text and content work.
-- Spreadsheets and dashboards.
+Форматы по умолчанию:
 
-The first version runs locally on Daniil's computer. It stores state in JSON files inside the repository and creates a separate folder for each order.
+- даты и время: `ДД.ММ.ГГГГ HH:MM МСК`;
+- часовой пояс: `Europe/Moscow`;
+- суммы: рубли, например `15 000 руб.` или `15 000 ₽`;
+- телефоны: формат РФ, например `+7 999 123-45-67`;
+- ссылки и никнеймы: без изменения исходного формата платформы;
+- деловая переписка: вежливый русский стиль без англицизмов там, где есть понятный русский вариант.
 
-AI execution is manual in the first version. The agent prepares a `prompt.md` file and a short Telegram summary for Codex or ChatGPT, but it does not call the OpenAI API itself.
+Машинные имена статусов, JSON-поля, пути файлов и команды остаются ASCII/English, чтобы код, тесты и интеграции были стабильными.
 
-## Non-Goals
+## Область Первой Версии
 
-The first version does not include:
+Первая версия поддерживает такие категории проектов:
 
-- Direct OpenAI API calls.
-- A web dashboard.
-- A cloud database.
-- Automatic payment acceptance.
-- Automatic login to freelance exchanges through browser automation.
-- Anti-bot bypasses or scraping behind authentication walls.
-- Autonomous agreement on price, deadline, guarantees, or payment terms.
+- Telegram-боты.
+- Автоматизации и парсеры.
+- Тексты и контент.
+- Таблицы и дашборды.
 
-## Architecture
+Первая версия работает локально на компьютере Даниила. Состояние хранится в JSON-файлах внутри репозитория. Для каждого заказа создается отдельная папка.
 
-Add a new local agent mode beside the current monitor. The current monitor remains responsible for finding candidate vacancies from public Telegram pages and RSS feeds. The new agent turns accepted vacancies into order records and coordinates approvals through Telegram.
+AI-выполнение в первой версии ручное. Агент готовит файл `prompt.md` и короткую сводку в Telegram для Codex или ChatGPT, но сам не вызывает OpenAI API.
 
-Core components:
+## Не Входит В Первую Версию
 
-- `monitor`: reads public Telegram and RSS sources, filters suitable jobs, and passes accepted posts to the agent.
-- `order store`: stores order state in JSON files and maintains an index for quick lookup.
-- `telegram control bot`: sends Daniil order cards and inline approval buttons.
-- `conversation adapter`: handles customer contact channels when a safe and explicit channel is available.
-- `workspace builder`: creates a per-order working folder with human-readable files.
-- `draft executor`: prepares files and Telegram summaries for manual Codex or ChatGPT execution.
+Первая версия не включает:
 
-## Order Lifecycle
+- прямые вызовы OpenAI API;
+- веб-панель;
+- облачную базу данных;
+- автоматическое принятие оплаты;
+- автоматический вход на биржи через браузер;
+- обход антибот-защиты или парсинг закрытых страниц;
+- самостоятельное согласование цены, срока, гарантий или условий оплаты.
 
-Orders move through these statuses:
+## Архитектура
 
-1. `new`: a suitable job has been found and persisted.
-2. `awaiting_response_approval`: the agent drafted the first outreach and is waiting for Daniil's approval.
-3. `outreach_sent`: the first outreach was sent through an automated supported channel.
-4. `manual_send_needed`: the agent prepared a message, but Daniil must send it manually.
-5. `send_failed`: the agent tried to send an approved message through a supported channel, but delivery failed.
-6. `discovery`: the customer has responded and the agent is collecting requirements.
-7. `awaiting_terms_approval`: the agent drafted price, deadline, scope, or payment terms and is waiting for Daniil's approval.
-8. `draft_ready`: the agent prepared `prompt.md` and the order workspace for manual execution.
-9. `awaiting_delivery_approval`: a deliverable or customer message is ready but needs approval before sending.
-10. `payment_requested`: the agent has identified that Daniil needs to accept or request payment.
-11. `closed`: the order is finished, declined, or no longer actionable.
+Добавляем новый локальный режим агента рядом с текущим монитором. Текущий монитор продолжает находить заказы из публичных Telegram-страниц и RSS-лент. Новый агент превращает подходящие вакансии в карточки заказов и проводит подтверждения через Telegram.
 
-## Workflow
+Основные компоненты:
 
-1. The monitor finds a suitable job from the allowed categories.
-2. The agent creates `orders/<order_id>/` and updates `orders/index.json`.
-3. The agent writes initial order files:
-   - `state.json` for machine-readable state.
-   - `brief.md` for the source job, category, risks, and initial assessment.
-   - `conversation.md` for the message history.
-   - `prompt.md` for manual Codex or ChatGPT execution.
-   - `deliverables/` for produced work.
-4. The agent sends Daniil a Telegram card with the source job and first outreach draft.
-5. Daniil chooses `Approve outreach`, `Edit`, or `Reject`.
-6. If a supported automated contact channel exists, the agent sends the approved outreach. Otherwise it switches the order to `manual_send_needed` and gives Daniil the exact text to send.
-7. When the customer replies, the agent adds the reply to `conversation.md`, extracts requirements, and drafts follow-up questions or terms.
-8. Price, deadline, guarantees, and payment terms always require Daniil's approval.
-9. After terms are approved, the agent prepares or updates `prompt.md` and sends Daniil a short Telegram summary.
-10. Daniil manually runs Codex or ChatGPT and places outputs into `deliverables/` or marks the draft as ready.
-11. The agent drafts the customer-facing delivery message but does not send it without `Allow sending`.
-12. When payment should be requested or accepted, the agent sends a dedicated Telegram notification and moves the order to `payment_requested`.
+- `monitor`: читает публичные Telegram и RSS-источники, фильтрует подходящие заказы и передает их агенту.
+- `order store`: хранит состояние заказов в JSON-файлах и ведет индекс для быстрого поиска.
+- `telegram control bot`: отправляет Даниилу карточки заказов и inline-кнопки подтверждения.
+- `conversation adapter`: работает с каналами связи заказчика, когда доступен безопасный и явный канал.
+- `workspace builder`: создает рабочую папку заказа с человекочитаемыми файлами.
+- `draft executor`: готовит файлы и Telegram-сводки для ручного запуска Codex или ChatGPT.
 
-## Data Model
+## Жизненный Цикл Заказа
 
-The first version uses repository-local files:
+Заказ проходит через такие статусы:
 
-- `data/seen_posts.json`: existing list of processed vacancy post IDs.
-- `orders/index.json`: list of orders with IDs, statuses, source URLs, categories, and timestamps.
-- `orders/<order_id>/state.json`: full machine-readable order state.
-- `orders/<order_id>/brief.md`: human-readable source job and assessment.
-- `orders/<order_id>/conversation.md`: customer conversation log.
-- `orders/<order_id>/prompt.md`: ready-to-run prompt for Codex or ChatGPT.
-- `orders/<order_id>/deliverables/`: files produced during manual execution.
+1. `new`: найден и сохранен подходящий заказ.
+2. `awaiting_response_approval`: агент подготовил первый отклик и ждет подтверждения Даниила.
+3. `outreach_sent`: первый отклик отправлен через поддерживаемый автоматический канал.
+4. `manual_send_needed`: агент подготовил сообщение, но Даниил должен отправить его вручную.
+5. `send_failed`: агент пытался отправить утвержденное сообщение через поддерживаемый канал, но отправка не удалась.
+6. `discovery`: заказчик ответил, агент собирает требования.
+7. `awaiting_terms_approval`: агент подготовил цену, срок, объем работ или условия оплаты и ждет подтверждения Даниила.
+8. `draft_ready`: агент подготовил `prompt.md` и рабочую папку для ручного выполнения.
+9. `awaiting_delivery_approval`: результат или сообщение заказчику готовы, но требуют подтверждения перед отправкой.
+10. `payment_requested`: агент понял, что Даниилу нужно запросить или принять оплату.
+11. `closed`: заказ завершен, отклонен или больше не требует действий.
 
-`state.json` should include:
+## Рабочий Процесс
 
-- order ID;
-- source type and source URL;
-- original post ID;
-- detected category;
-- current status;
-- contact channel and contact value when available;
-- latest approved outreach text;
-- approved price and deadline when set;
-- risk flags;
-- created and updated timestamps.
+1. Монитор находит подходящий заказ из разрешенных категорий.
+2. Агент создает `orders/<order_id>/` и обновляет `orders/index.json`.
+3. Агент записывает начальные файлы заказа:
+   - `state.json` для машинного состояния;
+   - `brief.md` с исходным заказом, категорией, рисками и первичной оценкой;
+   - `conversation.md` с историей переписки;
+   - `prompt.md` для ручного запуска в Codex или ChatGPT;
+   - `deliverables/` для результатов работы.
+4. Агент отправляет Даниилу в Telegram карточку заказа и черновик первого отклика.
+5. Даниил выбирает `Одобрить отклик`, `Править` или `Отклонить`.
+6. Если есть поддерживаемый автоматический канал связи, агент отправляет утвержденный отклик. Если такого канала нет, агент переводит заказ в `manual_send_needed` и дает точный текст для ручной отправки.
+7. Когда заказчик отвечает, агент добавляет ответ в `conversation.md`, выделяет требования и готовит уточняющие вопросы или условия.
+8. Цена, срок, гарантии и условия оплаты всегда требуют подтверждения Даниила.
+9. После согласования условий агент готовит или обновляет `prompt.md` и отправляет Даниилу короткую Telegram-сводку.
+10. Даниил вручную запускает Codex или ChatGPT и кладет результат в `deliverables/` либо отмечает, что черновик готов.
+11. Агент готовит сообщение заказчику с результатом, но не отправляет его без кнопки `Разрешить отправку`.
+12. Когда нужно запросить или принять оплату, агент отправляет отдельное уведомление и переводит заказ в `payment_requested`.
 
-## Telegram Control
+## Данные
 
-The existing Telegram bot becomes the approval surface. Agent messages to Daniil should use inline buttons for actions such as:
+Первая версия использует локальные файлы репозитория:
 
-- `Approve outreach`;
-- `Edit outreach`;
-- `Reject`;
-- `Sent manually`;
-- `Approve terms`;
-- `Request changes`;
-- `Draft ready`;
-- `Allow sending`;
-- `Payment requested`;
-- `Close order`.
+- `data/seen_posts.json`: существующий список уже обработанных вакансий.
+- `orders/index.json`: список заказов с ID, статусами, ссылками на источник, категориями и датами.
+- `orders/<order_id>/state.json`: полное машинное состояние заказа.
+- `orders/<order_id>/brief.md`: исходный заказ и оценка на русском языке.
+- `orders/<order_id>/conversation.md`: журнал переписки с заказчиком.
+- `orders/<order_id>/prompt.md`: готовый промпт для Codex или ChatGPT.
+- `orders/<order_id>/deliverables/`: файлы результата.
 
-All callbacks must validate the current order status before applying a transition. Invalid or stale callbacks should produce a Telegram notice and leave state unchanged.
+`state.json` должен хранить:
 
-## Customer Channels
+- ID заказа;
+- тип источника и ссылку на источник;
+- исходный ID поста;
+- распознанную категорию;
+- текущий статус;
+- канал связи и контакт, если они доступны;
+- последний утвержденный текст отклика;
+- утвержденную цену и срок, если они согласованы;
+- флаги риска;
+- даты создания и обновления в формате `ДД.ММ.ГГГГ HH:MM МСК`.
 
-The agent can act automatically only when there is a safe and explicit communication channel:
+## Управление Через Telegram
 
-- Telegram contact that can be messaged through supported tooling.
-- Email through configured IMAP/SMTP access.
-- Official exchange API, if available.
-- Manual mode for exchanges or links without supported API access.
+Существующий Telegram-бот становится поверхностью управления. Сообщения агента Даниилу должны использовать русские inline-кнопки:
 
-Manual mode is a first-class path. A Telegram username or exchange profile link does not automatically mean the bot can send messages itself. If the project has no supported API or authenticated messaging integration, the agent still prepares the message and records the conversation, while Daniil performs the actual send and confirms it with `Sent manually`.
+- `Одобрить отклик`;
+- `Править`;
+- `Отклонить`;
+- `Отправлено вручную`;
+- `Согласовать условия`;
+- `Попросить правки`;
+- `Черновик готов`;
+- `Разрешить отправку`;
+- `Оплата нужна`;
+- `Закрыть заказ`.
 
-## Safety Rules
+Все callback-действия должны проверять текущий статус заказа перед переходом. Недействительные или устаревшие кнопки должны показывать уведомление в Telegram и не менять состояние.
 
-The agent must be conservative:
+## Каналы Связи С Заказчиком
 
-- First outreach is never sent without approval.
-- Price, deadline, guarantees, and payment terms are never sent without approval.
-- Customer-facing deliverables are never sent without approval.
-- The agent declines or flags requests involving spam, fake engagement, phishing, malware, credential theft, platform restriction bypasses, or illegal collection of personal data.
-- If a contact channel is unclear, the agent switches to manual mode.
-- If JSON state cannot be written, the agent does not mark a vacancy as processed.
-- If message sending fails, the agent keeps the order in `manual_send_needed` or `send_failed` and preserves the text for manual sending.
+Агент может действовать автоматически только при наличии безопасного и явного канала связи:
 
-## Error Handling
+- Telegram-контакт, которому можно написать через поддерживаемый инструмент.
+- Email через настроенный IMAP/SMTP-доступ.
+- Официальный API биржи, если он доступен.
+- Ручной режим для бирж и ссылок без поддерживаемого API.
 
-State writes should be atomic enough to avoid corrupt JSON on interruption. If an order folder cannot be created, the agent sends Daniil an error notification and leaves the source post unprocessed so it can be retried.
+Ручной режим считается полноценным сценарием. Telegram-ник или ссылка на профиль биржи сами по себе не означают, что бот может написать заказчику автоматически. Если у проекта нет поддерживаемого API или настроенной интеграции сообщений, агент готовит текст и записывает переписку, а Даниил отправляет сообщение сам и подтверждает это кнопкой `Отправлено вручную`.
 
-If `orders/index.json` and `orders/<order_id>/state.json` disagree, the per-order `state.json` is the source of truth and the index can be rebuilt.
+## Правила Безопасности
 
-If the Telegram callback handler receives an unknown order ID, stale status, or unsupported action, it should respond in Telegram and make no state change.
+Агент должен действовать консервативно:
 
-## Testing
+- первый отклик никогда не отправляется без подтверждения;
+- цена, срок, гарантии и условия оплаты никогда не отправляются без подтверждения;
+- результат работы или сообщение с результатом никогда не отправляются без подтверждения;
+- агент отклоняет или помечает как рискованные задачи про спам, накрутки, фишинг, вредоносное ПО, кражу учетных данных, обход ограничений платформ и незаконный сбор персональных данных;
+- если канал связи неясен, агент переходит в ручной режим;
+- если JSON-состояние нельзя записать, агент не помечает вакансию обработанной;
+- если отправка сообщения не удалась, агент оставляет заказ в `manual_send_needed` или `send_failed` и сохраняет текст для ручной отправки.
 
-Tests should cover:
+## Ошибки
 
-- Creating an order from a matched post.
-- Creating the expected order folder structure.
-- Updating `orders/index.json`.
-- Valid lifecycle transitions.
-- Rejection of invalid lifecycle transitions.
-- Telegram callback parsing and status validation.
-- Manual send flow.
-- Rules that prevent first outreach, terms, and delivery from being sent without approval.
-- Handling corrupt JSON.
-- Retrying a post when order persistence fails.
+Запись состояния должна быть достаточно атомарной, чтобы не портить JSON при прерывании процесса. Если папку заказа создать не удалось, агент отправляет Даниилу уведомление об ошибке и не помечает исходный пост обработанным, чтобы его можно было повторить.
 
-## Implementation Strategy
+Если `orders/index.json` и `orders/<order_id>/state.json` расходятся, источником истины считается `orders/<order_id>/state.json`, а индекс можно перестроить.
 
-Build this as an incremental local extension of the existing Python project:
+Если обработчик Telegram callback получает неизвестный ID заказа, устаревший статус или неподдерживаемое действие, он должен ответить в Telegram и не менять состояние.
 
-1. Add order models and JSON store.
-2. Add workspace creation.
-3. Add Telegram approval messages and callback handling.
-4. Connect matched posts from the monitor into order creation.
-5. Add manual send and manual execution flows.
-6. Add tests around state, callbacks, and safety gates.
+## Тестирование
 
-The existing GitHub Actions monitor can remain available for passive notifications, but the semi-autonomous agent should be run locally because it needs active Telegram interaction and access to local order workspaces.
+Тесты должны покрывать:
+
+- создание заказа из подходящего поста;
+- создание ожидаемой структуры папки заказа;
+- обновление `orders/index.json`;
+- корректные переходы статусов;
+- отказ от недопустимых переходов статусов;
+- разбор Telegram callback и проверку текущего статуса;
+- ручной сценарий отправки;
+- правила, запрещающие отправлять первый отклик, условия и результат без подтверждения;
+- поврежденный JSON;
+- повторную обработку поста, если сохранить заказ не удалось.
+
+## Стратегия Реализации
+
+Реализуем как постепенное локальное расширение текущего Python-проекта:
+
+1. Добавить модели заказа и JSON-хранилище.
+2. Добавить создание рабочей папки заказа.
+3. Добавить Telegram-сообщения с кнопками подтверждения и обработку callback.
+4. Подключить создание заказов к подходящим постам из монитора.
+5. Добавить ручную отправку и ручной сценарий выполнения.
+6. Добавить тесты состояния, callback-действий и защитных правил.
+
+Существующий GitHub Actions-монитор можно оставить для пассивных уведомлений, но полуавтономный агент должен запускаться локально, потому что ему нужны активные Telegram-действия и доступ к локальным папкам заказов.
