@@ -97,6 +97,19 @@ def test_rejects_technical_task_when_it_is_long_term_support():
     assert "долгосрочная занятость" in result.risks
 
 
+def test_rejects_platform_limit_bypass_tasks():
+    post = make_post(
+        "Сгенерировать 900 сервисных ключей для API Вконтакте. Нужны дополнительные "
+        "ключи для увеличения скорости парсинга, через любой аккаунт зайти в раздел разработчиков. "
+        "Бюджет 5000 руб."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "обход ограничений платформ" in result.risks
+
+
 def test_formats_actionable_telegram_message():
     post = make_post("Нужно настроить CRM Bitrix24: воронка, роботы, триггеры. Бюджет 20000.")
     result = evaluate_post(post)
