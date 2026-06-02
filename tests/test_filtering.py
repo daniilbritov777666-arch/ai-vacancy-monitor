@@ -110,6 +110,44 @@ def test_rejects_platform_limit_bypass_tasks():
     assert "обход ограничений платформ" in result.risks
 
 
+def test_rejects_marketplace_product_selection_vacancy():
+    post = make_post(
+        "Требуется специалист по подбору товаров для маркетплейсов. Задачи: находить "
+        "востребованные товары, искать поставщиков, заносить данные в рабочие таблицы. "
+        "Доход: от 70 000 ₽, свободный график, обучение предоставляется, перспективы роста."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "постоянная вакансия/подработка" in result.risks
+    assert "не IT-заказ" in result.risks
+
+
+def test_rejects_pc_support_not_project_delivery():
+    post = make_post(
+        "Пропал интернет. Без видимой причины перестали открываться все сайты. "
+        "Бюджет 500 руб."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
+
+
+def test_accepts_one_off_content_task_with_fixed_deliverable():
+    post = make_post(
+        "Разовая задача: подготовить текст для лендинга Telegram-бота и описание сценариев "
+        "автоматизации. Бюджет 8000 руб."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is True
+    assert "тексты/контент" in result.reasons
+
+
 def test_formats_actionable_telegram_message():
     post = make_post("Нужно настроить CRM Bitrix24: воронка, роботы, триггеры. Бюджет 20000.")
     result = evaluate_post(post)

@@ -88,7 +88,7 @@ def test_handle_order_callback_updates_valid_transition(tmp_path):
     store.save_order(order)
 
     updated = handle_order_callback(
-        callback_data=f"order:approve_outreach:{order.order_id}",
+        callback_data=f"o:ao:{order.order_id}",
         store=store,
         answer=answers.append,
     )
@@ -112,7 +112,7 @@ def test_handle_order_callback_rejects_stale_transition(tmp_path):
     store.save_order(order)
 
     updated = handle_order_callback(
-        callback_data=f"order:approve_terms:{order.order_id}",
+        callback_data=f"o:at:{order.order_id}",
         store=store,
         answer=answers.append,
     )
@@ -139,7 +139,7 @@ def test_poll_telegram_once_handles_callback_updates(tmp_path):
             "update_id": 100,
             "callback_query": {
                 "id": "callback-1",
-                "data": f"order:approve_outreach:{order.order_id}",
+                "data": f"o:ao:{order.order_id}",
             },
         }
     ]

@@ -28,7 +28,24 @@ def test_build_order_keyboard_uses_ru_buttons():
     keyboard = build_order_keyboard(order)
 
     assert keyboard["inline_keyboard"][0][0]["text"] == "Одобрить отклик"
-    assert keyboard["inline_keyboard"][0][0]["callback_data"].startswith("order:approve_outreach:")
+    assert keyboard["inline_keyboard"][0][0]["callback_data"].startswith("o:ao:")
+
+
+def test_callback_data_fits_telegram_limit():
+    post = Post(
+        source="www.fl.ru/rss/projects.xml",
+        post_id="www.fl.ru/rss/projects.xml:https://www.fl.ru/projects/5507785/sozdat-prilojenie-dlya-vk.html",
+        url="https://www.fl.ru/projects/5507785/sozdat-prilojenie-dlya-vk.html",
+        text="Создать приложение для VK. Бюджет 10 000 руб.",
+        published_at="2026-06-02T12:00:00+03:00",
+    )
+    order = make_order_from_post(post, category="Автоматизации и парсеры", risks=[])
+
+    keyboard = build_order_keyboard(order)
+
+    for row in keyboard["inline_keyboard"]:
+        for button in row:
+            assert len(button["callback_data"].encode("utf-8")) <= 64
 
 
 def test_approve_outreach_requires_waiting_status():

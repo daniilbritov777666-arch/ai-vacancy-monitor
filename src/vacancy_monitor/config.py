@@ -5,12 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-DEFAULT_CHANNELS = [
-    "mari_vakansii",
-    "digitaltender",
-    "FreeVacanciesIT",
-    "rueventjob",
-]
+DEFAULT_CHANNELS: list[str] = []
 
 DEFAULT_RSS_FEEDS = [
     "https://www.fl.ru/rss/projects.xml",

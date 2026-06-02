@@ -25,11 +25,29 @@ class ParsedCallback:
     order_id: str
 
 
+ACTION_CODES = {
+    CallbackAction.APPROVE_OUTREACH: "ao",
+    CallbackAction.EDIT: "e",
+    CallbackAction.REJECT: "r",
+    CallbackAction.SENT_MANUALLY: "sm",
+    CallbackAction.APPROVE_TERMS: "at",
+    CallbackAction.REQUEST_CHANGES: "rc",
+    CallbackAction.DRAFT_READY: "dr",
+    CallbackAction.ALLOW_SENDING: "as",
+    CallbackAction.PAYMENT_NEEDED: "pn",
+    CallbackAction.CLOSE: "c",
+}
+
+CODE_ACTIONS = {value: key for key, value in ACTION_CODES.items()}
+
+
 def parse_callback_data(value: str) -> ParsedCallback:
     prefix, action, order_id = value.split(":", 2)
-    if prefix != "order":
-        raise ValueError("unsupported callback prefix")
-    return ParsedCallback(action=CallbackAction(action), order_id=order_id)
+    if prefix == "o":
+        return ParsedCallback(action=CODE_ACTIONS[action], order_id=order_id)
+    if prefix == "order":
+        return ParsedCallback(action=CallbackAction(action), order_id=order_id)
+    raise ValueError("unsupported callback prefix")
 
 
 def build_order_keyboard(order: Order) -> dict:
@@ -88,4 +106,4 @@ def resolve_transition(
 
 
 def _button(text: str, action: CallbackAction, order: Order) -> dict:
-    return {"text": text, "callback_data": f"order:{action.value}:{order.order_id}"}
+    return {"text": text, "callback_data": f"o:{ACTION_CODES[action]}:{order.order_id}"}
