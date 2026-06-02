@@ -9,7 +9,7 @@ def suitable_post(post_id: str) -> Post:
         source=source,
         post_id=post_id,
         url=f"https://example.com/{post_id}",
-        text="Нужен лендинг на Tilda для курса, бюджет 15000.",
+        text="Нужен Telegram-бот для приема заявок и запись в Google Sheets, бюджет 15000.",
         published_at=None,
     )
 

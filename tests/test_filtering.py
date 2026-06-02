@@ -12,7 +12,7 @@ def make_post(text: str) -> Post:
     )
 
 
-def test_accepts_ai_friendly_landing_page_task():
+def test_rejects_plain_website_task_outside_current_scope():
     post = make_post(
         "Нужен лендинг на Tilda для онлайн-школы. Есть структура, оплатим 15000, "
         "можно без сложного кода, важно быстро собрать и оформить."
@@ -20,10 +20,8 @@ def test_accepts_ai_friendly_landing_page_task():
 
     result = evaluate_post(post)
 
-    assert result.accepted is True
-    assert result.score >= 3
-    assert "сайты/лендинги" in result.reasons
-    assert "готовый отклик" not in result.reasons
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
 
 
 def test_rejects_senior_fulltime_developer_vacancy():
@@ -134,6 +132,30 @@ def test_rejects_pc_support_not_project_delivery():
 
     assert result.accepted is False
     assert "не IT-заказ" in result.risks
+
+
+def test_rejects_word_formatting_without_spreadsheet_deliverable():
+    post = make_post(
+        "Режактиров WORD файла. Есть ворд документ. Нужно оформить таблицу. "
+        "Бюджет 1000 руб."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
+
+
+def test_accepts_google_sheets_dashboard_task():
+    post = make_post(
+        "Разовая задача: собрать дашборд в Google Sheets, формулы и отчет по заявкам. "
+        "Бюджет 12000 руб."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is True
+    assert "таблицы/дашборды" in result.reasons
 
 
 def test_accepts_one_off_content_task_with_fixed_deliverable():

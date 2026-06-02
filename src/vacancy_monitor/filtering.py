@@ -6,15 +6,6 @@ from vacancy_monitor.models import MatchResult, Post
 
 
 POSITIVE_PATTERNS = {
-    "сайты/лендинги": [
-        r"\bлендинг",
-        r"\blanding\b",
-        r"tilda|тильд",
-        r"wordpress|вордпресс",
-        r"webflow",
-        r"taplink|таплинк",
-        r"\bсайт\b",
-    ],
     "боты": [
         r"telegram[-\s]?бот",
         r"тг[-\s]?бот",
@@ -44,10 +35,10 @@ POSITIVE_PATTERNS = {
     "таблицы/дашборды": [
         r"google sheets",
         r"\bexcel\b",
-        r"таблиц",
         r"формул",
         r"макрос",
         r"дашборд|dashboard",
+        r"отчет\s+по\s+заявк",
     ],
     "тексты/контент": [
         r"\bтекст",
@@ -110,6 +101,12 @@ NEGATIVE_PATTERNS = {
         r"востребованные\s+товары",
         r"пропал\s+интернет",
         r"не\s+открываются\s+.*сайт",
+        r"\bword\b",
+        r"\bворд\b",
+        r"оформить\s+таблиц",
+        r"сделать\s+сайт",
+        r"создани[ея]\s+.*сайт",
+        r"сайт[-\s]?визитк",
     ],
     "контент/smm/маркетинг": [
         r"\bsmm\b",
@@ -178,7 +175,7 @@ def evaluate_post(post: Post) -> MatchResult:
     if has_money_signal:
         reasons.append("есть сигнал оплаты")
 
-    has_technical_signal = any(reason != "есть сигнал оплаты" for reason in reasons)
+    has_technical_signal = any(reason not in {"есть сигнал оплаты", "можно без глубокого кода"} for reason in reasons)
     if not has_technical_signal:
         risks.append("не IT-заказ")
 
