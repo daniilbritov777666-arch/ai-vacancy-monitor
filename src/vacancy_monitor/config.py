@@ -25,6 +25,7 @@ class Config:
     auto_mode: str = "off"
     auto_max_price_rub: int = 15000
     openai_model: str = "gpt-4.1-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str | None = None
 
     @classmethod
@@ -39,6 +40,7 @@ class Config:
         auto_mode = os.environ.get("AUTO_MODE", "off").strip().lower()
         auto_max_price_rub = int(os.environ.get("AUTO_MAX_PRICE_RUB", "15000"))
         openai_model = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini").strip()
+        openai_base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
         openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip() or None
 
         if not bot_token:
@@ -59,6 +61,7 @@ class Config:
             auto_mode=auto_mode,
             auto_max_price_rub=auto_max_price_rub,
             openai_model=openai_model,
+            openai_base_url=openai_base_url,
             openai_api_key=openai_api_key,
         )
 

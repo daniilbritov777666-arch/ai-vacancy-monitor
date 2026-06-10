@@ -1,5 +1,7 @@
 import json
 
+import requests
+
 from vacancy_monitor.autopilot import (
     AutopilotResult,
     OpenAIResponsesClient,
@@ -12,10 +14,16 @@ from vacancy_monitor.workspace import create_order_workspace
 
 
 class Response:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self.payload = payload
+        self.status_code = status_code
+        self.text = json.dumps(payload, ensure_ascii=False)
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            error = requests.HTTPError(f"{self.status_code} error")
+            error.response = self
+            raise error
         return None
 
     def json(self):
@@ -59,6 +67,21 @@ def safe_payload():
     }
 
 
+def safe_chat_payload():
+    data = {
+        "safe_to_autopilot": True,
+        "risk_flags": [],
+        "summary_ru": "Нужен бот для приема заявок.",
+        "outreach_ru": "Здравствуйте! Готов выполнить бота для заявок.",
+        "execution_plan_ru": "1. Уточнить поля заявки. 2. Собрать бота. 3. Проверить запись в таблицу.",
+        "price_rub": 12000,
+        "deadline_ru": "2 дня",
+        "deliverable_markdown": "# Черновик результата\n\nПлан бота и структура таблицы.",
+        "customer_message_ru": "Здравствуйте! Подготовил план и могу приступить.",
+    }
+    return {"choices": [{"message": {"content": json.dumps(data, ensure_ascii=False)}}]}
+
+
 def test_openai_responses_client_sends_schema_payload(monkeypatch):
     calls = []
 
@@ -67,16 +90,39 @@ def test_openai_responses_client_sends_schema_payload(monkeypatch):
         return Response(safe_payload())
 
     monkeypatch.setattr("vacancy_monitor.autopilot.requests.post", fake_post)
-    client = OpenAIResponsesClient(api_key="sk-test", model="gpt-test")
+    client = OpenAIResponsesClient(api_key="sk-test", model="gpt-test", base_url="https://api.example.com/v1/")
 
     result = client.analyze_order(make_order())
 
     assert isinstance(result, AutopilotResult)
     assert result.safe_to_autopilot is True
-    assert calls[0]["url"].endswith("/v1/responses")
+    assert calls[0]["url"] == "https://api.example.com/v1/responses"
     assert calls[0]["headers"]["Authorization"] == "Bearer sk-test"
     assert calls[0]["json"]["model"] == "gpt-test"
     assert calls[0]["json"]["text"]["format"]["type"] == "json_schema"
+
+
+def test_openai_client_falls_back_to_chat_completions_when_responses_unsupported(monkeypatch):
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
+        if url.endswith("/responses"):
+            return Response(
+                {"error": {"message": "Please use '/v1/chat/completions' instead."}},
+                status_code=400,
+            )
+        return Response(safe_chat_payload())
+
+    monkeypatch.setattr("vacancy_monitor.autopilot.requests.post", fake_post)
+    client = OpenAIResponsesClient(api_key="sk-test", model="gpt-test", base_url="https://api.example.com/v1")
+
+    result = client.analyze_order(make_order())
+
+    assert result.safe_to_autopilot is True
+    assert calls[0]["url"] == "https://api.example.com/v1/responses"
+    assert calls[1]["url"] == "https://api.example.com/v1/chat/completions"
+    assert calls[1]["json"]["response_format"] == {"type": "json_object"}
 
 
 def test_run_order_autopilot_writes_files_and_moves_safe_order_to_draft_ready(tmp_path):

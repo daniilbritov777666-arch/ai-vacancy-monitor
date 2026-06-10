@@ -23,6 +23,7 @@ def test_autopilot_config_defaults(monkeypatch):
     assert config.auto_mode == "off"
     assert config.auto_max_price_rub == 15000
     assert config.openai_model
+    assert config.openai_base_url == "https://api.openai.com/v1"
     assert config.openai_api_key is None
 
 
@@ -32,6 +33,7 @@ def test_autopilot_config_reads_env(monkeypatch):
     monkeypatch.setenv("AUTO_MODE", "autopilot")
     monkeypatch.setenv("AUTO_MAX_PRICE_RUB", "9000")
     monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.example.com/v1")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     config = Config.from_env()
@@ -39,4 +41,5 @@ def test_autopilot_config_reads_env(monkeypatch):
     assert config.auto_mode == "autopilot"
     assert config.auto_max_price_rub == 9000
     assert config.openai_model == "gpt-test"
+    assert config.openai_base_url == "https://api.example.com/v1"
     assert config.openai_api_key == "sk-test"

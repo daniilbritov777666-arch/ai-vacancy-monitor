@@ -24,26 +24,50 @@ class AutopilotResult:
 
 
 class OpenAIResponsesClient:
-    def __init__(self, *, api_key: str, model: str):
+    def __init__(self, *, api_key: str, model: str, base_url: str = "https://api.openai.com/v1"):
         self.api_key = api_key
         self.model = model
+        self.base_url = base_url.rstrip("/")
 
     def analyze_order(self, order: Order) -> AutopilotResult:
+        try:
+            response = requests.post(
+                f"{self.base_url}/responses",
+                headers=self._headers(),
+                json={
+                    "model": self.model,
+                    "input": _build_input(order),
+                    "text": {"format": _json_schema_format()},
+                },
+                timeout=60,
+            )
+            response.raise_for_status()
+            return AutopilotResult(**json.loads(_extract_output_text(response.json())))
+        except requests.HTTPError as exc:
+            if not _should_fallback_to_chat(exc):
+                raise
+        return self._analyze_order_with_chat_completions(order)
+
+    def _headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _analyze_order_with_chat_completions(self, order: Order) -> AutopilotResult:
         response = requests.post(
-            "https://api.openai.com/v1/responses",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
+            f"{self.base_url}/chat/completions",
+            headers=self._headers(),
             json={
                 "model": self.model,
-                "input": _build_input(order),
-                "text": {"format": _json_schema_format()},
+                "messages": _build_chat_messages(order),
+                "response_format": {"type": "json_object"},
+                "temperature": 0.2,
             },
             timeout=60,
         )
         response.raise_for_status()
-        return AutopilotResult(**json.loads(_extract_output_text(response.json())))
+        return AutopilotResult(**json.loads(_extract_chat_content(response.json())))
 
 
 def run_order_autopilot(
@@ -119,6 +143,22 @@ def _build_input(order: Order) -> list[dict]:
     ]
 
 
+def _build_chat_messages(order: Order) -> list[dict]:
+    messages = _build_input(order)
+    return [
+        messages[0],
+        {
+            "role": "user",
+            "content": (
+                f"{messages[1]['content']}\n\n"
+                "Верни только валидный JSON-объект без Markdown. Обязательные ключи: "
+                "safe_to_autopilot, risk_flags, summary_ru, outreach_ru, execution_plan_ru, "
+                "price_rub, deadline_ru, deliverable_markdown, customer_message_ru."
+            ),
+        },
+    ]
+
+
 def _json_schema_format() -> dict:
     properties = {
         "safe_to_autopilot": {"type": "boolean"},
@@ -152,3 +192,27 @@ def _extract_output_text(payload: dict) -> str:
     if "output_text" in payload:
         return payload["output_text"]
     raise RuntimeError("OpenAI response did not contain output_text")
+
+
+def _extract_chat_content(payload: dict) -> str:
+    choices = payload.get("choices", [])
+    if choices:
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+    raise RuntimeError("Chat completions response did not contain message content")
+
+
+def _should_fallback_to_chat(exc: requests.HTTPError) -> bool:
+    response = getattr(exc, "response", None)
+    if response is None or getattr(response, "status_code", None) != 400:
+        return False
+    try:
+        payload = response.json()
+    except Exception:
+        text = getattr(response, "text", "")
+    else:
+        error = payload.get("error") if isinstance(payload, dict) else None
+        text = error.get("message", "") if isinstance(error, dict) else str(payload)
+    return "chat/completions" in text

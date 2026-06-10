@@ -98,6 +98,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
   - `autopilot` - AI готовит файлы и переводит безопасный заказ до `draft_ready`, если цена не выше лимита.
 - `OPENAI_API_KEY` - ключ OpenAI API для режимов `draft` и `autopilot`.
 - `OPENAI_MODEL` - модель OpenAI. По умолчанию `gpt-4.1-mini`.
+- `OPENAI_BASE_URL` - базовый URL OpenAI-compatible API. По умолчанию `https://api.openai.com/v1`.
 - `AUTO_MAX_PRICE_RUB` - максимальная цена, при которой `autopilot` может сам продвинуть заказ до черновика. По умолчанию `15000`.
 
 Файлы AI-слоя в папке заказа:

@@ -108,7 +108,11 @@ def _maybe_run_autopilot(
     if config.auto_mode == "off" or not config.openai_api_key:
         return order
 
-    client = autopilot_client or OpenAIResponsesClient(api_key=config.openai_api_key, model=config.openai_model)
+    client = autopilot_client or OpenAIResponsesClient(
+        api_key=config.openai_api_key,
+        model=config.openai_model,
+        base_url=config.openai_base_url,
+    )
     try:
         result = client.analyze_order(order)
         updated = run_order_autopilot(
