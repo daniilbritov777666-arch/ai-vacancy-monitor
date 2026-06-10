@@ -85,6 +85,8 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" PYTHONPATH=src python3 -m 
 TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTHONPATH=src python3 -m vacancy_monitor.local_agent_cli
 ```
 
+Для macOS LaunchAgent используй `scripts/run_local_agent.sh`. Если путь к проекту содержит кириллицу, запускай через ASCII-symlink, как описано в `docs/MARKETPLACES_PAYMENTS_RU.md`.
+
 Дополнительные переменные:
 
 - `ORDERS_PATH` - папка заказов. По умолчанию `orders`.

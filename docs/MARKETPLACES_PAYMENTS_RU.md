@@ -99,3 +99,20 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" AUTO_MODE=autopilot OPENAI
 ```
 
 Если `OPENAI_API_KEY` не задан, автопилот не готов. Если не заданы токены бирж и ЮKassa, агент все равно может искать проекты и готовить черновики, но не сможет сам отправлять отклики через API и выставлять внешние платежи.
+
+## Текущий локальный запуск
+
+На Mac с папкой проекта `Даня_Vibe_Code` используется ASCII-symlink:
+
+```bash
+ln -sfn "/Users/daniilbritov/Documents/Даня_Vibe_Code" "$HOME/.codex/vibe-code-project"
+mkdir -p "$HOME/.codex/vacancy-agent-logs"
+```
+
+LaunchAgent запускает:
+
+```bash
+/bin/zsh "$HOME/.codex/vacancy-agent-runner.sh"
+```
+
+Это нужно из-за кириллицы в пути проекта: launchd/zsh в некоторых режимах искажает такой путь и процесс завершается до запуска Python.

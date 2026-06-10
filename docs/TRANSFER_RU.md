@@ -75,8 +75,27 @@ TELEGRAM_CHAT_ID=150761046 AUTO_MODE=autopilot PYTHONPATH=src python3 -m vacancy
 ~/Library/LaunchAgents/com.codex.vacancy-agent.plist
 ```
 
-6. В plist заменить `/ABSOLUTE/PATH/TO/freelance-agent` на реальный путь к папке проекта.
-7. Запустить:
+6. В plist заменить `/ABSOLUTE/ASCII/PATH/TO/freelance-agent` на реальный путь к папке проекта или на ASCII-symlink. Если реальная папка содержит кириллицу, создай symlink:
+
+```bash
+ln -sfn "/путь/к/проекту/с/кириллицей" "$HOME/.codex/vibe-code-project"
+```
+
+И используй `$HOME/.codex/vibe-code-project` в plist.
+
+7. Указать ASCII-папку логов, например:
+
+```bash
+mkdir -p "$HOME/.codex/vacancy-agent-logs"
+```
+
+8. Убедиться, что скрипт исполняемый:
+
+```bash
+chmod +x scripts/run_local_agent.sh
+```
+
+9. Запустить:
 
 ```bash
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.codex.vacancy-agent.plist

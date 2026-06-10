@@ -7,3 +7,6 @@ __pycache__/
 
 .worktrees/
 orders/
+freelance-agent-transfer-*/
+freelance-agent-transfer-*.zip
+.transfer-verify/

@@ -6,13 +6,12 @@
   <string>com.codex.vacancy-agent</string>
 
   <key>WorkingDirectory</key>
-  <string>/ABSOLUTE/PATH/TO/freelance-agent</string>
+  <string>/ABSOLUTE/ASCII/PATH/TO/freelance-agent</string>
 
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>-lc</string>
-    <string>export TELEGRAM_BOT_TOKEN="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.telegram-token -w)"; export OPENAI_API_KEY="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.openai-api-key -w 2&gt;/dev/null || true)"; cd "/ABSOLUTE/PATH/TO/freelance-agent" &amp;&amp; exec /usr/bin/env PYTHONPATH=src python3 -m vacancy_monitor.local_agent_cli</string>
+    <string>/ABSOLUTE/ASCII/PATH/TO/freelance-agent/scripts/run_local_agent.sh</string>
   </array>
 
   <key>EnvironmentVariables</key>
@@ -40,8 +39,8 @@
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/ABSOLUTE/PATH/TO/freelance-agent/orders/launchd.out.log</string>
+  <string>/ABSOLUTE/ASCII/PATH/TO/logs/launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/ABSOLUTE/PATH/TO/freelance-agent/orders/launchd.err.log</string>
+  <string>/ABSOLUTE/ASCII/PATH/TO/logs/launchd.err.log</string>
 </dict>
 </plist>
