@@ -70,11 +70,17 @@ def run_monitor(
                 continue
 
             matched += 1
-            if on_match is not None:
-                on_match(post, result)
-            else:
-                message = format_match_message(post, result)
-                send_message(message)
+            try:
+                if on_match is not None:
+                    on_match(post, result)
+                else:
+                    message = format_match_message(post, result)
+                    send_message(message)
+            except Exception as exc:
+                errors += 1
+                print(f"Failed to handle matched post {post.url}: {type(exc).__name__}")
+                state.add(post.post_id)
+                continue
             state.add(post.post_id)
             sent += 1
 

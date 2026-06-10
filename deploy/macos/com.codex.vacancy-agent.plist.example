@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.codex.vacancy-agent</string>
+
+  <key>WorkingDirectory</key>
+  <string>/ABSOLUTE/PATH/TO/freelance-agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>export TELEGRAM_BOT_TOKEN="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.telegram-token -w)"; export OPENAI_API_KEY="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.openai-api-key -w 2&gt;/dev/null || true)"; cd "/ABSOLUTE/PATH/TO/freelance-agent" &amp;&amp; exec /usr/bin/env PYTHONPATH=src python3 -m vacancy_monitor.local_agent_cli</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TELEGRAM_CHAT_ID</key>
+    <string>150761046</string>
+    <key>LOCAL_AGENT_LOOP</key>
+    <string>true</string>
+    <key>LOCAL_AGENT_INTERVAL_SECONDS</key>
+    <string>300</string>
+    <key>STATE_PATH</key>
+    <string>orders/seen_posts.json</string>
+    <key>ORDERS_PATH</key>
+    <string>orders</string>
+    <key>AUTO_MODE</key>
+    <string>autopilot</string>
+    <key>AUTO_MAX_PRICE_RUB</key>
+    <string>15000</string>
+    <key>OPENAI_MODEL</key>
+    <string>gpt-4.1-mini</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/ABSOLUTE/PATH/TO/freelance-agent/orders/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/ABSOLUTE/PATH/TO/freelance-agent/orders/launchd.err.log</string>
+</dict>
+</plist>

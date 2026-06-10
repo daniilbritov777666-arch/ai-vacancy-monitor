@@ -22,6 +22,10 @@ class Config:
     state_path: Path
     send_first_run: bool
     orders_path: Path
+    auto_mode: str = "off"
+    auto_max_price_rub: int = 15000
+    openai_model: str = "gpt-4.1-mini"
+    openai_api_key: str | None = None
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -32,11 +36,17 @@ class Config:
         state_path = Path(os.environ.get("STATE_PATH", "data/seen_posts.json"))
         send_first_run = os.environ.get("SEND_FIRST_RUN", "").lower() in {"1", "true", "yes"}
         orders_path = Path(os.environ.get("ORDERS_PATH", "orders"))
+        auto_mode = os.environ.get("AUTO_MODE", "off").strip().lower()
+        auto_max_price_rub = int(os.environ.get("AUTO_MAX_PRICE_RUB", "15000"))
+        openai_model = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini").strip()
+        openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip() or None
 
         if not bot_token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
         if not chat_id:
             raise RuntimeError("TELEGRAM_CHAT_ID is required")
+        if auto_mode not in {"off", "draft", "autopilot"}:
+            raise RuntimeError("AUTO_MODE must be off, draft, or autopilot")
 
         return cls(
             bot_token=bot_token,
@@ -46,6 +56,10 @@ class Config:
             state_path=state_path,
             send_first_run=send_first_run,
             orders_path=orders_path,
+            auto_mode=auto_mode,
+            auto_max_price_rub=auto_max_price_rub,
+            openai_model=openai_model,
+            openai_api_key=openai_api_key,
         )
 
 

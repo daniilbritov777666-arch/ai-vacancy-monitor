@@ -31,6 +31,12 @@ class OrderStore:
             return {"orders": []}
         return _read_json(self.index_path)
 
+    def list_orders(self) -> list[Order]:
+        return [
+            Order.from_dict(_read_json(path))
+            for path in sorted(self.orders_dir.glob("*/state.json"))
+        ]
+
     def update_status(self, order_id: str, status: OrderStatus) -> Order:
         order = self.load_order(order_id)
         updated = replace(order, status=status, updated_at=format_moscow_time())
