@@ -50,6 +50,11 @@ class FakeAutopilotClient:
         return self.result
 
 
+class FailingAutopilotClient:
+    def analyze_order(self, order):
+        raise RuntimeError("provider failed")
+
+
 def test_run_local_agent_creates_order_for_new_match(tmp_path):
     sent = []
     config = make_config(tmp_path)
@@ -222,6 +227,37 @@ def test_run_local_agent_processes_existing_pending_order_after_restart(tmp_path
     updated = store.load_order(order.order_id)
     assert updated.status == OrderStatus.DRAFT_READY
     assert (store.order_dir(order.order_id) / "autopilot" / "analysis.json").exists()
+
+
+def test_run_local_agent_does_not_crash_when_autopilot_error_notification_fails(tmp_path, capsys):
+    config = replace(make_config(tmp_path), auto_mode="autopilot", openai_api_key="sk-test")
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="sample",
+        post_id="sample/1",
+        url="https://t.me/sample/1",
+        text="Нужен Telegram-бот для заявок, интеграция с Google Sheets. Оплата 12 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+    store.save_order(order)
+
+    def failing_send(text, reply_markup=None):
+        raise TimeoutError("telegram timeout for bot123:secret-token")
+
+    summary = run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=failing_send,
+        autopilot_client=FailingAutopilotClient(),
+    )
+
+    assert summary.errors == 0
+    assert store.load_order(order.order_id).status == OrderStatus.AWAITING_RESPONSE_APPROVAL
+    output = capsys.readouterr().out
+    assert "notification failed: TimeoutError" in output
+    assert "secret-token" not in output
 
 
 def test_run_local_agent_skips_autopilot_without_openai_key(tmp_path):

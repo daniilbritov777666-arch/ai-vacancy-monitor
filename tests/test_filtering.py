@@ -146,6 +146,63 @@ def test_rejects_word_formatting_without_spreadsheet_deliverable():
     assert "не IT-заказ" in result.risks
 
 
+def test_rejects_autocad_drawing_edits():
+    post = make_post("Внести изменения в чертежи АР AutoCAD, кладочные планы, окна. Оплата 7000 руб.")
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
+
+
+def test_rejects_call_listening_and_table_filling():
+    post = make_post("Прослушать звонки и заполнить таблицу по шаблону. Оплата 5000 руб.")
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
+
+
+def test_rejects_legal_claim_work():
+    post = make_post("Подать в суд на туркомпанию, работа за процент от полученного без предоплаты.")
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
+
+
+def test_rejects_legal_claim_work_even_with_documents_and_amount():
+    post = make_post(
+        "Подача в суд на туркомпанию. Оплатили тур стоимостью 302 000 руб., "
+        "есть документы подписанные от турагента."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
+
+
+def test_rejects_html_site_edit_without_automation_scope():
+    post = make_post("Отредактировать HTML сайт, поправить блоки и тексты. Оплата 3000 руб.")
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
+
+
+def test_rejects_article_proofreading_without_it_deliverable():
+    post = make_post("Проверка и редактура английской версии статьи. Оплата 4000 руб.")
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "контент/smm/маркетинг" in result.risks
+
+
 def test_accepts_google_sheets_dashboard_task():
     post = make_post(
         "Разовая задача: собрать дашборд в Google Sheets, формулы и отчет по заявкам. "

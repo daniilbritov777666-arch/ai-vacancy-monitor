@@ -123,11 +123,18 @@ def _maybe_run_autopilot(
             mode=config.auto_mode,
         )
     except Exception as exc:
-        sender(f"AI-черновик по заказу {order.order_id} не создан: {exc}")
+        _safe_notify(sender, f"AI-черновик по заказу {order.order_id} не создан: {type(exc).__name__}")
         return order
 
-    sender(_autopilot_status_message(updated, config.auto_mode))
+    _safe_notify(sender, _autopilot_status_message(updated, config.auto_mode))
     return updated
+
+
+def _safe_notify(sender: Callable[..., None], text: str) -> None:
+    try:
+        sender(text)
+    except Exception as exc:
+        print(f"Telegram notification failed: {type(exc).__name__}")
 
 
 def _autopilot_status_message(order: Order, mode: str) -> str:
