@@ -43,3 +43,17 @@ def test_autopilot_config_reads_env(monkeypatch):
     assert config.openai_model == "gpt-test"
     assert config.openai_base_url == "https://api.example.com/v1"
     assert config.openai_api_key == "sk-test"
+
+
+def test_freelancehunt_config_reads_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("FREELANCEHUNT_API_TOKEN", "fh-token")
+    monkeypatch.setenv("FREELANCEHUNT_BID_SAFE_TYPE", "split")
+    monkeypatch.setenv("FREELANCEHUNT_BID_DAYS", "3")
+
+    config = Config.from_env()
+
+    assert config.freelancehunt_api_token == "fh-token"
+    assert config.freelancehunt_bid_safe_type == "split"
+    assert config.freelancehunt_bid_days == 3

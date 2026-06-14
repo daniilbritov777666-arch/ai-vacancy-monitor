@@ -27,6 +27,9 @@ class Config:
     openai_model: str = "gpt-4.1-mini"
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str | None = None
+    freelancehunt_api_token: str | None = None
+    freelancehunt_bid_safe_type: str = "employer"
+    freelancehunt_bid_days: int = 2
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -42,6 +45,9 @@ class Config:
         openai_model = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini").strip()
         openai_base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
         openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip() or None
+        freelancehunt_api_token = os.environ.get("FREELANCEHUNT_API_TOKEN", "").strip() or None
+        freelancehunt_bid_safe_type = os.environ.get("FREELANCEHUNT_BID_SAFE_TYPE", "employer").strip()
+        freelancehunt_bid_days = int(os.environ.get("FREELANCEHUNT_BID_DAYS", "2"))
 
         if not bot_token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
@@ -49,6 +55,8 @@ class Config:
             raise RuntimeError("TELEGRAM_CHAT_ID is required")
         if auto_mode not in {"off", "draft", "autopilot"}:
             raise RuntimeError("AUTO_MODE must be off, draft, or autopilot")
+        if freelancehunt_bid_safe_type not in {"employer", "developer", "split", "employer_cashless"}:
+            raise RuntimeError("FREELANCEHUNT_BID_SAFE_TYPE must be employer, developer, split, or employer_cashless")
 
         return cls(
             bot_token=bot_token,
@@ -63,6 +71,9 @@ class Config:
             openai_model=openai_model,
             openai_base_url=openai_base_url,
             openai_api_key=openai_api_key,
+            freelancehunt_api_token=freelancehunt_api_token,
+            freelancehunt_bid_safe_type=freelancehunt_bid_safe_type,
+            freelancehunt_bid_days=freelancehunt_bid_days,
         )
 
 

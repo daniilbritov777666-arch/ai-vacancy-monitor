@@ -102,6 +102,7 @@ def make_order_from_post(post: Post, *, category: str, risks: list[str] | None =
         status=OrderStatus.AWAITING_RESPONSE_APPROVAL,
         created_at=now_ru,
         updated_at=now_ru,
+        contact=_contact_from_post(post),
         risks=risks or [],
     )
 
@@ -116,3 +117,17 @@ def _parse_post_datetime(value: str | None) -> datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed
+
+
+def _contact_from_post(post: Post) -> CustomerContact | None:
+    project_id = _freelancehunt_project_id(post.url) or _freelancehunt_project_id(post.post_id)
+    if project_id:
+        return CustomerContact(channel="freelancehunt", value=project_id, can_auto_send=True)
+    return None
+
+
+def _freelancehunt_project_id(value: str) -> str | None:
+    if "freelancehunt.com" not in value:
+        return None
+    match = re.search(r"/project/[^/]+/(\d+)(?:\\.html)?", value)
+    return match.group(1) if match else None

@@ -48,3 +48,20 @@ def test_make_order_from_post_uses_ru_defaults():
     assert order.deadline_ru is None
     assert order.risks == ["уточнить доступы"]
     assert order.created_at.endswith("МСК")
+
+
+def test_make_order_from_freelancehunt_post_enables_api_contact():
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+
+    assert order.contact is not None
+    assert order.contact.channel == "freelancehunt"
+    assert order.contact.value == "123456"
+    assert order.contact.can_auto_send is True

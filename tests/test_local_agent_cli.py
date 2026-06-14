@@ -333,6 +333,92 @@ def test_handle_order_callback_updates_valid_transition(tmp_path):
     assert answers == ["Готово."]
 
 
+def test_handle_order_callback_sends_freelancehunt_bid_when_supported(tmp_path):
+    answers = []
+    sent_orders = []
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+    store.save_order(order)
+    order_dir = store.order_dir(order.order_id)
+    (order_dir / "autopilot").mkdir(parents=True)
+    (order_dir / "autopilot" / "outreach.md").write_text(
+        "Здравствуйте! Готов выполнить Telegram-бота для заявок.\n",
+        encoding="utf-8",
+    )
+
+    updated = handle_order_callback(
+        callback_data=f"o:ao:{order.order_id}",
+        store=store,
+        answer=answers.append,
+        send_outreach=lambda order, text: sent_orders.append((order.order_id, text)),
+    )
+
+    assert updated is not None
+    assert updated.status == OrderStatus.OUTREACH_SENT
+    assert updated.latest_approved_outreach == "Здравствуйте! Готов выполнить Telegram-бота для заявок."
+    assert sent_orders == [(order.order_id, "Здравствуйте! Готов выполнить Telegram-бота для заявок.")]
+    assert answers == ["Отклик отправлен через freelancehunt."]
+
+
+def test_handle_order_callback_falls_back_to_manual_without_outreach_sender(tmp_path):
+    answers = []
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+    store.save_order(order)
+
+    updated = handle_order_callback(
+        callback_data=f"o:ao:{order.order_id}",
+        store=store,
+        answer=answers.append,
+    )
+
+    assert updated is not None
+    assert updated.status == OrderStatus.MANUAL_SEND_NEEDED
+    assert updated.latest_approved_outreach
+    assert answers == ["Готово."]
+
+
+def test_handle_order_callback_can_send_outreach_from_draft_ready(tmp_path):
+    answers = []
+    sent_orders = []
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.DRAFT_READY)
+    store.save_order(order)
+
+    updated = handle_order_callback(
+        callback_data=f"o:ao:{order.order_id}",
+        store=store,
+        answer=answers.append,
+        send_outreach=lambda order, text: sent_orders.append((order.order_id, text)),
+    )
+
+    assert updated is not None
+    assert updated.status == OrderStatus.OUTREACH_SENT
+    assert sent_orders == [(order.order_id, updated.latest_approved_outreach)]
+    assert answers == ["Отклик отправлен через freelancehunt."]
+
+
 def test_handle_order_callback_rejects_stale_transition(tmp_path):
     answers = []
     store = OrderStore(tmp_path / "orders")
