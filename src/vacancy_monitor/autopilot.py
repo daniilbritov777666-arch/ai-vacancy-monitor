@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -94,6 +95,7 @@ def run_order_autopilot(
     max_price_rub: int,
     mode: str,
 ) -> Order:
+    result = _result_with_budget_fallback(order, result)
     order_dir = store.order_dir(order.order_id)
     _write_autopilot_files(order_dir, result)
 
@@ -112,6 +114,41 @@ def run_order_autopilot(
     updated = replace(order, risks=result.risk_flags, updated_at=format_moscow_time())
     store.save_order(updated)
     return updated
+
+
+def _result_with_budget_fallback(order: Order, result: AutopilotResult) -> AutopilotResult:
+    if result.price_rub > 0:
+        return result
+    fallback_price = _extract_budget_rub(order.original_text)
+    if fallback_price <= 0:
+        return result
+    return replace(result, price_rub=fallback_price)
+
+
+def _extract_budget_rub(text: str) -> int:
+    compact = text.lower().replace("\xa0", " ")
+    patterns = [
+        (r"(\d[\d\s]*)\s*(?:₽|руб|р\.)", 1),
+        (r"(\d[\d\s]*)\s*(?:uah|грн|₴)", 2),
+        (r"(\d[\d\s]*)\s*(?:usd|\$)", 90),
+        (r"(\d[\d\s]*)\s*(?:eur|€)", 100),
+        (r"(\d[\d\s]*)\s*(?:pln|zł)", 22),
+    ]
+    for pattern, rate in patterns:
+        match = re.search(pattern, compact)
+        if not match:
+            continue
+        amount = int(re.sub(r"\D", "", match.group(1)) or "0")
+        return _round_price_rub(amount * rate)
+    return 0
+
+
+def _round_price_rub(value: int) -> int:
+    if value <= 0:
+        return 0
+    if value < 1000:
+        return value
+    return (value // 100) * 100
 
 
 def _write_autopilot_files(order_dir: Path, result: AutopilotResult) -> None:

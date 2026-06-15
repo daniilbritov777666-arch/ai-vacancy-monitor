@@ -31,6 +31,7 @@ def run_local_agent_once(
     fetch_rss_posts: Callable[[str], list[Post]] | None = fetch_rss_feed_posts,
     send_message: Callable[..., None] | None = None,
     autopilot_client: AutopilotClient | None = None,
+    send_outreach: Callable[[Order, str], None] | None = None,
 ) -> MonitorSummary:
     store = OrderStore(config.orders_path)
     sender = send_message or (
@@ -40,6 +41,11 @@ def run_local_agent_once(
             text,
             reply_markup=reply_markup,
         )
+    )
+    outreach_sender = send_outreach or (
+        (lambda order, text: _send_marketplace_outreach(config, order, text))
+        if config.freelancehunt_api_token
+        else None
     )
 
     def on_match(post: Post, result: MatchResult) -> None:
@@ -55,6 +61,7 @@ def run_local_agent_once(
             store=store,
             sender=sender,
             autopilot_client=autopilot_client,
+            send_outreach=outreach_sender,
         )
 
     summary = run_monitor(
@@ -72,6 +79,13 @@ def run_local_agent_once(
         store=store,
         sender=sender,
         autopilot_client=autopilot_client,
+        send_outreach=outreach_sender,
+    )
+    _process_pending_auto_outreach_orders(
+        config=config,
+        store=store,
+        sender=sender,
+        send_outreach=outreach_sender,
     )
     return summary
 
@@ -82,6 +96,7 @@ def _process_pending_autopilot_orders(
     store: OrderStore,
     sender: Callable[..., None],
     autopilot_client: AutopilotClient | None,
+    send_outreach: Callable[[Order, str], None] | None,
 ) -> None:
     if config.auto_mode == "off" or not config.openai_api_key:
         return
@@ -96,6 +111,28 @@ def _process_pending_autopilot_orders(
             store=store,
             sender=sender,
             autopilot_client=autopilot_client,
+            send_outreach=send_outreach,
+        )
+
+
+def _process_pending_auto_outreach_orders(
+    *,
+    config: Config,
+    store: OrderStore,
+    sender: Callable[..., None],
+    send_outreach: Callable[[Order, str], None] | None,
+) -> None:
+    if not config.auto_outreach_enabled:
+        return
+    for order in store.list_orders():
+        if order.status != OrderStatus.DRAFT_READY:
+            continue
+        _maybe_auto_send_outreach(
+            config=config,
+            order=order,
+            store=store,
+            sender=sender,
+            send_outreach=send_outreach,
         )
 
 
@@ -106,6 +143,7 @@ def _maybe_run_autopilot(
     store: OrderStore,
     sender: Callable[..., None],
     autopilot_client: AutopilotClient | None,
+    send_outreach: Callable[[Order, str], None] | None,
 ) -> Order:
     if config.auto_mode == "off" or not config.openai_api_key:
         return order
@@ -124,12 +162,80 @@ def _maybe_run_autopilot(
             max_price_rub=config.auto_max_price_rub,
             mode=config.auto_mode,
         )
+        updated = _maybe_auto_send_outreach(
+            config=config,
+            order=updated,
+            store=store,
+            sender=sender,
+            send_outreach=send_outreach,
+        )
     except Exception as exc:
         _safe_notify(sender, f"AI-черновик по заказу {order.order_id} не создан: {type(exc).__name__}")
         return order
 
     _safe_notify(sender, _autopilot_status_message(updated, config.auto_mode))
     return updated
+
+
+def _maybe_auto_send_outreach(
+    *,
+    config: Config,
+    order: Order,
+    store: OrderStore,
+    sender: Callable[..., None],
+    send_outreach: Callable[[Order, str], None] | None,
+) -> Order:
+    if not config.auto_outreach_enabled or order.status != OrderStatus.DRAFT_READY:
+        return order
+    if order.risks:
+        return order
+    if send_outreach is None or not (order.contact and order.contact.can_auto_send):
+        return order
+    if _auto_outreach_count_today(store) >= config.auto_outreach_daily_limit:
+        _safe_notify(sender, f"Автоотклик по заказу {order.order_id} пропущен: дневной лимит исчерпан.")
+        return order
+
+    outreach_text = _read_outreach_text(store, order)
+    try:
+        send_outreach(order, outreach_text)
+    except Exception as exc:
+        updated = replace(
+            order,
+            status=OrderStatus.SEND_FAILED,
+            latest_approved_outreach=outreach_text,
+            updated_at=format_moscow_time(),
+        )
+        store.save_order(updated)
+        _safe_notify(sender, f"Автоотклик по заказу {order.order_id} не отправлен: {type(exc).__name__}.")
+        return updated
+
+    updated = replace(
+        order,
+        status=OrderStatus.OUTREACH_SENT,
+        latest_approved_outreach=outreach_text,
+        updated_at=format_moscow_time(),
+    )
+    store.save_order(updated)
+    _safe_notify(
+        sender,
+        (
+            "Автоотклик отправлен на Freelancehunt.\n\n"
+            f"ID: {updated.order_id}\n"
+            f"Проект: {updated.source_url}\n"
+            f"Цена: {updated.price_rub} руб.\n"
+            f"Срок: {updated.deadline_ru or 'не указан'}"
+        ),
+    )
+    return updated
+
+
+def _auto_outreach_count_today(store: OrderStore) -> int:
+    today_prefix = format_moscow_time().split(" ", 1)[0]
+    return sum(
+        1
+        for order in store.list_orders()
+        if order.status == OrderStatus.OUTREACH_SENT and order.updated_at.startswith(today_prefix)
+    )
 
 
 def _safe_notify(sender: Callable[..., None], text: str) -> None:
@@ -140,6 +246,15 @@ def _safe_notify(sender: Callable[..., None], text: str) -> None:
 
 
 def _autopilot_status_message(order: Order, mode: str) -> str:
+    if order.status == OrderStatus.OUTREACH_SENT:
+        return (
+            "AI-агент уже отправил отклик.\n\n"
+            f"ID: {order.order_id}\n"
+            f"Статус: {order.status.value}\n"
+            f"Цена: {order.price_rub or 'не указана'} руб.\n"
+            f"Срок: {order.deadline_ru or 'не указан'}\n\n"
+            "Дальше нужно ждать ответа заказчика в переписке Freelancehunt."
+        )
     if mode == "autopilot" and order.status.value == "draft_ready":
         return (
             "AI-агент подготовил черновое выполнение.\n\n"
@@ -312,7 +427,7 @@ def run_local_agent_loop(
         else None
     )
     while True:
-        run_local_agent_once(config)
+        run_local_agent_once(config, send_outreach=send_outreach)
         next_offset = poll_telegram_safely(
             bot_token=config.bot_token,
             offset=offset,

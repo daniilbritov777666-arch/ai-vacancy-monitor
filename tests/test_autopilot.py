@@ -41,6 +41,28 @@ def make_order():
     return make_order_from_post(post, category="Telegram-боты", risks=[])
 
 
+def make_order_without_budget():
+    post = Post(
+        source="sample",
+        post_id="sample/2",
+        url="https://example.com/project/2",
+        text="Нужен Telegram-бот для приема заявок и записи в Google Sheets.",
+        published_at="2026-06-04T12:00:00+03:00",
+    )
+    return make_order_from_post(post, category="Telegram-боты", risks=[])
+
+
+def make_order_with_uah_budget():
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/integratsiya-wms/1635222.html",
+        url="https://freelancehunt.com/project/integratsiya-wms/1635222.html",
+        text="Интеграция WMS & 1C - 1000UAH. Нужно помочь с доработками интеграции.",
+        published_at="2026-06-15T12:00:00+03:00",
+    )
+    return make_order_from_post(post, category="Автоматизации и парсеры", risks=[])
+
+
 def safe_payload():
     data = {
         "safe_to_autopilot": True,
@@ -193,7 +215,7 @@ def test_run_order_autopilot_writes_files_and_moves_safe_order_to_draft_ready(tm
 
 def test_run_order_autopilot_keeps_zero_price_order_waiting_for_approval(tmp_path):
     store = OrderStore(tmp_path / "orders")
-    order = make_order()
+    order = make_order_without_budget()
     store.save_order(order)
     create_order_workspace(store.orders_dir, order)
     result = AutopilotResult(
@@ -214,6 +236,29 @@ def test_run_order_autopilot_keeps_zero_price_order_waiting_for_approval(tmp_pat
     assert updated.status == OrderStatus.AWAITING_RESPONSE_APPROVAL
     assert (order_dir / "autopilot" / "execution_plan.md").read_text(encoding="utf-8")
     assert (order_dir / "deliverables" / "autopilot_result.md").exists()
+
+
+def test_run_order_autopilot_uses_budget_fallback_when_ai_returns_zero_price(tmp_path):
+    store = OrderStore(tmp_path / "orders")
+    order = make_order_with_uah_budget()
+    store.save_order(order)
+    create_order_workspace(store.orders_dir, order)
+    result = AutopilotResult(
+        safe_to_autopilot=True,
+        risk_flags=[],
+        summary_ru="Нужна интеграция WMS и 1C.",
+        outreach_ru="Здравствуйте! Готов обсудить интеграцию WMS и 1C.",
+        execution_plan_ru="Уточнить детали и предложить план.",
+        price_rub=0,
+        deadline_ru="2 дня",
+        deliverable_markdown="# Черновик результата",
+        customer_message_ru="Готов обсудить детали.",
+    )
+
+    updated = run_order_autopilot(order=order, store=store, result=result, max_price_rub=15000, mode="autopilot")
+
+    assert updated.status == OrderStatus.DRAFT_READY
+    assert updated.price_rub == 2000
 
 
 def test_run_order_autopilot_keeps_unsafe_order_waiting_for_approval(tmp_path):

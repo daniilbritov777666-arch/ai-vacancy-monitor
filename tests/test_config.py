@@ -57,3 +57,15 @@ def test_freelancehunt_config_reads_env(monkeypatch):
     assert config.freelancehunt_api_token == "fh-token"
     assert config.freelancehunt_bid_safe_type == "split"
     assert config.freelancehunt_bid_days == 3
+
+
+def test_auto_outreach_config_reads_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("AUTO_OUTREACH_ENABLED", "true")
+    monkeypatch.setenv("AUTO_OUTREACH_DAILY_LIMIT", "4")
+
+    config = Config.from_env()
+
+    assert config.auto_outreach_enabled is True
+    assert config.auto_outreach_daily_limit == 4

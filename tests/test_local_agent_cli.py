@@ -202,6 +202,118 @@ def test_run_local_agent_autopilot_mode_moves_safe_order_to_draft_ready(tmp_path
     assert order.price_rub == 12000
 
 
+def test_run_local_agent_auto_sends_safe_freelancehunt_outreach(tmp_path):
+    sent = []
+    auto_sent = []
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_token="fh-token",
+        auto_outreach_enabled=True,
+        channels=[],
+        rss_feeds=["https://freelancehunt.com/projects.rss"],
+    )
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, интеграция с Google Sheets. Оплата 12 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [post],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        autopilot_client=FakeAutopilotClient(safe_autopilot_result()),
+        send_outreach=lambda order, text: auto_sent.append((order.contact.value, order.price_rub, text)),
+    )
+
+    store = OrderStore(config.orders_path)
+    order_id = next(Path(config.orders_path).glob("*/state.json")).parent.name
+    order = store.load_order(order_id)
+    assert order.status == OrderStatus.OUTREACH_SENT
+    assert order.price_rub == 12000
+    assert order.latest_approved_outreach == "Здравствуйте! Готов выполнить Telegram-бота для заявок."
+    assert auto_sent == [("123456", 12000, "Здравствуйте! Готов выполнить Telegram-бота для заявок.")]
+    assert any("Автоотклик отправлен" in message for message, _ in sent)
+
+
+def test_run_local_agent_does_not_auto_send_without_price(tmp_path):
+    auto_sent = []
+    result = replace(safe_autopilot_result(), price_rub=0)
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_token="fh-token",
+        auto_outreach_enabled=True,
+        channels=[],
+        rss_feeds=["https://freelancehunt.com/projects.rss"],
+    )
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, интеграция с Google Sheets. Бюджет обсуждается.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [post],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=FakeAutopilotClient(result),
+        send_outreach=lambda order, text: auto_sent.append((order.order_id, text)),
+    )
+
+    store = OrderStore(config.orders_path)
+    order_id = next(Path(config.orders_path).glob("*/state.json")).parent.name
+    order = store.load_order(order_id)
+    assert order.status == OrderStatus.AWAITING_RESPONSE_APPROVAL
+    assert auto_sent == []
+
+
+def test_run_local_agent_does_not_auto_send_when_ai_reports_risks(tmp_path):
+    auto_sent = []
+    result = replace(safe_autopilot_result(), risk_flags=["нужна узкая экспертиза 1С/WMS"])
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_token="fh-token",
+        auto_outreach_enabled=True,
+        channels=[],
+        rss_feeds=["https://freelancehunt.com/projects.rss"],
+    )
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/wms/123456.html",
+        url="https://freelancehunt.com/project/wms/123456.html",
+        text="Интеграция WMS & 1C - 1000UAH. Нужны доработки интеграции.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [post],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=FakeAutopilotClient(result),
+        send_outreach=lambda order, text: auto_sent.append((order.order_id, text)),
+    )
+
+    store = OrderStore(config.orders_path)
+    order_id = next(Path(config.orders_path).glob("*/state.json")).parent.name
+    order = store.load_order(order_id)
+    assert order.status == OrderStatus.DRAFT_READY
+    assert order.risks == ["нужна узкая экспертиза 1С/WMS"]
+    assert auto_sent == []
+
+
 def test_run_local_agent_processes_existing_pending_order_after_restart(tmp_path):
     sent = []
     config = replace(make_config(tmp_path), auto_mode="autopilot", openai_api_key="sk-test")
