@@ -80,6 +80,28 @@ def write_thread_reply_draft(
     return path
 
 
+def write_thread_reply_sent_record(
+    *,
+    store: OrderStore,
+    order: Order,
+    thread: FreelancehuntThread,
+    reply_text: str,
+    response_payload: dict,
+) -> Path:
+    outbox_dir = store.order_dir(order.order_id) / "outbox"
+    outbox_dir.mkdir(parents=True, exist_ok=True)
+    path = outbox_dir / f"freelancehunt_reply_{thread.thread_id}.sent.json"
+    payload = {
+        "thread_id": thread.thread_id,
+        "project_id": thread.project_id,
+        "sent_at": format_moscow_time(),
+        "message": reply_text,
+        "response": response_payload,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def _append_messages(path, thread: FreelancehuntThread, messages: list[FreelancehuntThreadMessage]) -> None:
     if not path.exists():
         path.write_text("# История переписки\n\n", encoding="utf-8")

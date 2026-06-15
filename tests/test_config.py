@@ -79,3 +79,17 @@ def test_conversation_config_reads_env(monkeypatch):
     config = Config.from_env()
 
     assert config.auto_conversation_enabled is True
+
+
+def test_auto_reply_and_execution_config_reads_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("AUTO_REPLY_ENABLED", "true")
+    monkeypatch.setenv("AUTO_REPLY_DAILY_LIMIT", "7")
+    monkeypatch.setenv("AUTO_EXECUTION_ENABLED", "true")
+
+    config = Config.from_env()
+
+    assert config.auto_reply_enabled is True
+    assert config.auto_reply_daily_limit == 7
+    assert config.auto_execution_enabled is True

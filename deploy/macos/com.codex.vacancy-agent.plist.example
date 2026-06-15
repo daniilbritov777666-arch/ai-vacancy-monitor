@@ -38,6 +38,12 @@
     <string>3</string>
     <key>AUTO_CONVERSATION_ENABLED</key>
     <string>true</string>
+    <key>AUTO_REPLY_ENABLED</key>
+    <string>true</string>
+    <key>AUTO_REPLY_DAILY_LIMIT</key>
+    <string>10</string>
+    <key>AUTO_EXECUTION_ENABLED</key>
+    <string>true</string>
     <key>OPENAI_MODEL</key>
     <string>gpt-4.1-mini</string>
     <key>OPENAI_BASE_URL</key>

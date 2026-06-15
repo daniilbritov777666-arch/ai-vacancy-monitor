@@ -15,7 +15,9 @@ from vacancy_monitor.conversation import (
     find_order_for_thread,
     sync_thread_to_order,
     write_thread_reply_draft,
+    write_thread_reply_sent_record,
 )
+from vacancy_monitor.execution import prepare_execution_workspace
 from vacancy_monitor.freelancehunt import (
     FreelancehuntBid,
     FreelancehuntClient,
@@ -48,6 +50,9 @@ class FreelancehuntConversationClient(Protocol):
         ...
 
     def mark_thread_read(self, thread_id: str) -> dict:
+        ...
+
+    def add_thread_message(self, *, thread_id: str, message_html: str) -> dict:
         ...
 
 
@@ -221,6 +226,14 @@ def _sync_freelancehunt_conversations(
             messages=messages,
             sender=sender,
             reply_client=reply_client,
+            marketplace_client=client,
+            config=config,
+        )
+        _maybe_prepare_execution_workspace(
+            config=config,
+            store=store,
+            order=updated_order,
+            sender=sender,
         )
 
 
@@ -232,6 +245,8 @@ def _maybe_draft_thread_reply(
     messages: list[FreelancehuntThreadMessage],
     sender: Callable[..., None],
     reply_client: ConversationReplyClient | None,
+    marketplace_client: FreelancehuntConversationClient,
+    config: Config,
 ) -> None:
     if reply_client is None or not any((not message.is_own) and message.text for message in messages):
         return
@@ -250,6 +265,135 @@ def _maybe_draft_thread_reply(
             f"{reply_text}"
         ),
     )
+    _maybe_auto_send_thread_reply(
+        config=config,
+        store=store,
+        order=order,
+        thread=thread,
+        messages=messages,
+        reply_text=reply_text,
+        sender=sender,
+        marketplace_client=marketplace_client,
+    )
+
+
+def _maybe_auto_send_thread_reply(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    thread: FreelancehuntThread,
+    messages: list[FreelancehuntThreadMessage],
+    reply_text: str,
+    sender: Callable[..., None],
+    marketplace_client: FreelancehuntConversationClient,
+) -> None:
+    if not config.auto_reply_enabled:
+        return
+    block_reason = _auto_reply_block_reason(config=config, store=store, order=order, messages=messages, reply_text=reply_text)
+    if block_reason:
+        _safe_notify(
+            sender,
+            (
+                "Автоотправка ответа заблокирована.\n\n"
+                f"ID: {order.order_id}\n"
+                f"Причина: {block_reason}\n\n"
+                "Черновик сохранен в outbox/."
+            ),
+        )
+        return
+    try:
+        response_payload = marketplace_client.add_thread_message(thread_id=thread.thread_id, message_html=reply_text)
+        write_thread_reply_sent_record(
+            store=store,
+            order=order,
+            thread=thread,
+            reply_text=reply_text,
+            response_payload=response_payload,
+        )
+    except Exception as exc:
+        _safe_notify(sender, f"AI-ответ по заказу {order.order_id} не отправлен: {type(exc).__name__}.")
+        return
+    _safe_notify(
+        sender,
+        (
+            "AI-ответ отправлен заказчику на Freelancehunt.\n\n"
+            f"ID: {order.order_id}\n"
+            f"Тред: {thread.thread_id}"
+        ),
+    )
+
+
+def _auto_reply_block_reason(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    messages: list[FreelancehuntThreadMessage],
+    reply_text: str,
+) -> str | None:
+    if order.risks:
+        return "у заказа есть риск-флаги"
+    if order.status not in {OrderStatus.OUTREACH_SENT, OrderStatus.DISCOVERY, OrderStatus.DRAFT_READY}:
+        return f"статус {order.status.value} не разрешен для автоответа"
+    if _auto_reply_count_today(store) >= config.auto_reply_daily_limit:
+        return "дневной лимит автоответов исчерпан"
+    combined_text = "\n".join([reply_text, *[message.text for message in messages if message.text]]).lower()
+    blocked_terms = [
+        "логин и пароль",
+        "логин/пароль",
+        "пароль от",
+        "seed",
+        "private key",
+        "приватный ключ",
+        "обойти лимит",
+        "обход лимитов",
+        "накрут",
+        "фишинг",
+        "вредонос",
+        "мимо безопасной сделки",
+        "вне безопасной сделки",
+        "без безопасной сделки",
+    ]
+    for term in blocked_terms:
+        if term in combined_text:
+            return f"опасный маркер: {term}"
+    return None
+
+
+def _auto_reply_count_today(store: OrderStore) -> int:
+    today_prefix = format_moscow_time().split(" ", 1)[0]
+    count = 0
+    for path in store.orders_dir.glob("*/outbox/freelancehunt_reply_*.sent.json"):
+        try:
+            if today_prefix in path.read_text(encoding="utf-8"):
+                count += 1
+        except OSError:
+            continue
+    return count
+
+
+def _maybe_prepare_execution_workspace(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    sender: Callable[..., None],
+) -> None:
+    if not config.auto_execution_enabled:
+        return
+    execution_dir = store.order_dir(order.order_id) / "execution"
+    existed = (execution_dir / "checklist.md").exists()
+    path = prepare_execution_workspace(store=store, order=order)
+    if not existed:
+        _safe_notify(
+            sender,
+            (
+                "Рабочий пакет выполнения создан.\n\n"
+                f"ID: {order.order_id}\n"
+                f"Папка: {path.relative_to(store.order_dir(order.order_id))}"
+            ),
+        )
 
 
 def _maybe_run_autopilot(

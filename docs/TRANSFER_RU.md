@@ -36,6 +36,8 @@
 - `AUTO_MODE=autopilot` - AI готовит файлы и переводит безопасный заказ в `draft_ready`, если цена не выше `AUTO_MAX_PRICE_RUB`.
 - `AUTO_OUTREACH_ENABLED=true` - агент может сам отправлять первый безопасный отклик на Freelancehunt.
 - `AUTO_CONVERSATION_ENABLED=true` - агент читает входящие треды Freelancehunt, сохраняет переписку, готовит AI-черновик ответа и уведомляет Telegram.
+- `AUTO_REPLY_ENABLED=true` - агент сам отправляет безопасные последующие ответы в тред Freelancehunt.
+- `AUTO_EXECUTION_ENABLED=true` - агент создает рабочий пакет выполнения после ответа заказчика.
 
 AI-слой пишет:
 
@@ -45,8 +47,10 @@ AI-слой пишет:
 - `orders/<order_id>/deliverables/autopilot_result.md`;
 - `orders/<order_id>/outbox/customer_message.md`.
 - `orders/<order_id>/outbox/freelancehunt_reply_<thread_id>.md`.
+- `orders/<order_id>/outbox/freelancehunt_reply_<thread_id>.sent.json`.
+- `orders/<order_id>/execution/`.
 
-Важно: автоматическая отправка последующих сообщений заказчику пока не включена. Сейчас агент сам отправляет только безопасный первый отклик на Freelancehunt, читает входящие ответы, сохраняет переписку, готовит AI-черновик ответа и уведомляет в Telegram.
+Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true` и блокируется safety-фильтром при риск-флагах, паролях, обходах лимитов, накрутках и оплате вне безопасной сделки. Отправка результата и принятие оплаты остаются точками подтверждения.
 
 ## Быстрый запуск на новом Mac
 
