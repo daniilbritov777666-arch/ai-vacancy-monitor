@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -31,18 +32,20 @@ class OpenAIResponsesClient:
 
     def analyze_order(self, order: Order) -> AutopilotResult:
         try:
-            response = requests.post(
-                f"{self.base_url}/responses",
-                headers=self._headers(),
-                json={
-                    "model": self.model,
-                    "input": _build_input(order),
-                    "text": {"format": _json_schema_format()},
-                },
-                timeout=60,
+            response = self._post_with_retry(
+                lambda: requests.post(
+                    f"{self.base_url}/responses",
+                    headers=self._headers(),
+                    json={
+                        "model": self.model,
+                        "input": _build_input(order),
+                        "text": {"format": _json_schema_format()},
+                    },
+                    timeout=60,
+                )
             )
             response.raise_for_status()
-            return AutopilotResult(**json.loads(_extract_output_text(response.json())))
+            return _parse_autopilot_result(_extract_output_text(response.json()))
         except requests.HTTPError as exc:
             if not _should_fallback_to_chat(exc):
                 raise
@@ -55,19 +58,32 @@ class OpenAIResponsesClient:
         }
 
     def _analyze_order_with_chat_completions(self, order: Order) -> AutopilotResult:
-        response = requests.post(
-            f"{self.base_url}/chat/completions",
-            headers=self._headers(),
-            json={
-                "model": self.model,
-                "messages": _build_chat_messages(order),
-                "response_format": {"type": "json_object"},
-                "temperature": 0.2,
-            },
-            timeout=60,
+        response = self._post_with_retry(
+            lambda: requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json={
+                    "model": self.model,
+                    "messages": _build_chat_messages(order),
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.2,
+                },
+                timeout=60,
+            )
         )
         response.raise_for_status()
-        return AutopilotResult(**json.loads(_extract_chat_content(response.json())))
+        return _parse_autopilot_result(_extract_chat_content(response.json()))
+
+    def _post_with_retry(self, send: Callable[[], requests.Response]) -> requests.Response:
+        last_exc: requests.RequestException | None = None
+        for _ in range(2):
+            try:
+                return send()
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_exc = exc
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("AI request did not run")
 
 
 def run_order_autopilot(
@@ -81,7 +97,7 @@ def run_order_autopilot(
     order_dir = store.order_dir(order.order_id)
     _write_autopilot_files(order_dir, result)
 
-    if mode == "autopilot" and result.safe_to_autopilot and result.price_rub <= max_price_rub:
+    if mode == "autopilot" and result.safe_to_autopilot and 0 < result.price_rub <= max_price_rub:
         updated = replace(
             order,
             status=OrderStatus.DRAFT_READY,
@@ -117,6 +133,45 @@ def _write_autopilot_files(order_dir: Path, result: AutopilotResult) -> None:
         encoding="utf-8",
     )
     (outbox_dir / "customer_message.md").write_text(result.customer_message_ru.strip() + "\n", encoding="utf-8")
+
+
+def _parse_autopilot_result(raw_text: str) -> AutopilotResult:
+    payload = json.loads(raw_text)
+    payload["risk_flags"] = _normalize_string_list(payload.get("risk_flags", []))
+    for field in (
+        "summary_ru",
+        "outreach_ru",
+        "execution_plan_ru",
+        "deadline_ru",
+        "deliverable_markdown",
+        "customer_message_ru",
+    ):
+        payload[field] = _normalize_text(payload.get(field, ""))
+    payload["price_rub"] = int(payload.get("price_rub") or 0)
+    payload["safe_to_autopilot"] = bool(payload.get("safe_to_autopilot"))
+    return AutopilotResult(**payload)
+
+
+def _normalize_text(value: object) -> str:
+    if isinstance(value, list):
+        lines = []
+        for index, item in enumerate(value, start=1):
+            text = str(item).strip()
+            if text:
+                lines.append(f"{index}. {text}")
+        return "\n".join(lines)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_string_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if value is None:
+        return []
+    text = str(value).strip()
+    return [text] if text else []
 
 
 def _build_input(order: Order) -> list[dict]:

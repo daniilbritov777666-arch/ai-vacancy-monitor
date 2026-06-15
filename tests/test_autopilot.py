@@ -125,6 +125,45 @@ def test_openai_client_falls_back_to_chat_completions_when_responses_unsupported
     assert calls[1]["json"]["response_format"] == {"type": "json_object"}
 
 
+def test_openai_client_retries_transient_timeout(monkeypatch):
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(url)
+        if len(calls) == 1:
+            raise requests.ReadTimeout("temporary timeout")
+        return Response(safe_payload())
+
+    monkeypatch.setattr("vacancy_monitor.autopilot.requests.post", fake_post)
+    client = OpenAIResponsesClient(api_key="sk-test", model="gpt-test", base_url="https://api.example.com/v1")
+
+    result = client.analyze_order(make_order())
+
+    assert result.safe_to_autopilot is True
+    assert calls == ["https://api.example.com/v1/responses", "https://api.example.com/v1/responses"]
+
+
+def test_openai_client_normalizes_list_execution_plan_from_chat(monkeypatch):
+    data = json.loads(safe_chat_payload()["choices"][0]["message"]["content"])
+    data["execution_plan_ru"] = ["Уточнить объем.", "Подготовить результат."]
+    json_module = json
+
+    def fake_post(url, headers, json, timeout):
+        if url.endswith("/responses"):
+            return Response(
+                {"error": {"message": "Please use '/v1/chat/completions' instead."}},
+                status_code=400,
+            )
+        return Response({"choices": [{"message": {"content": json_module.dumps(data, ensure_ascii=False)}}]})
+
+    monkeypatch.setattr("vacancy_monitor.autopilot.requests.post", fake_post)
+    client = OpenAIResponsesClient(api_key="sk-test", model="gpt-test", base_url="https://api.example.com/v1")
+
+    result = client.analyze_order(make_order())
+
+    assert result.execution_plan_ru == "1. Уточнить объем.\n2. Подготовить результат."
+
+
 def test_run_order_autopilot_writes_files_and_moves_safe_order_to_draft_ready(tmp_path):
     store = OrderStore(tmp_path / "orders")
     order = make_order()
@@ -150,6 +189,31 @@ def test_run_order_autopilot_writes_files_and_moves_safe_order_to_draft_ready(tm
     assert (order_dir / "autopilot" / "outreach.md").read_text(encoding="utf-8")
     assert (order_dir / "deliverables" / "autopilot_result.md").exists()
     assert (order_dir / "outbox" / "customer_message.md").exists()
+
+
+def test_run_order_autopilot_keeps_zero_price_order_waiting_for_approval(tmp_path):
+    store = OrderStore(tmp_path / "orders")
+    order = make_order()
+    store.save_order(order)
+    create_order_workspace(store.orders_dir, order)
+    result = AutopilotResult(
+        safe_to_autopilot=True,
+        risk_flags=[],
+        summary_ru="Нужно уточнить цену.",
+        outreach_ru="Здравствуйте! Уточню объем и предложу цену.",
+        execution_plan_ru="Сначала уточнить объем.",
+        price_rub=0,
+        deadline_ru="неясно",
+        deliverable_markdown="# Черновик результата",
+        customer_message_ru="Уточните объем.",
+    )
+
+    updated = run_order_autopilot(order=order, store=store, result=result, max_price_rub=15000, mode="autopilot")
+
+    order_dir = store.order_dir(order.order_id)
+    assert updated.status == OrderStatus.AWAITING_RESPONSE_APPROVAL
+    assert (order_dir / "autopilot" / "execution_plan.md").read_text(encoding="utf-8")
+    assert (order_dir / "deliverables" / "autopilot_result.md").exists()
 
 
 def test_run_order_autopilot_keeps_unsafe_order_waiting_for_approval(tmp_path):

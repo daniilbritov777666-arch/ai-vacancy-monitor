@@ -215,6 +215,38 @@ def test_accepts_google_sheets_dashboard_task():
     assert "таблицы/дашборды" in result.reasons
 
 
+def test_accepts_freelancehunt_telegram_bot_task_with_uah_budget():
+    post = make_post(
+        "Потрібно розробити Telegram-бота для прийому заявок. Оплата 3000UAH, "
+        "разовий проект."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is True
+    assert "боты" in result.reasons
+    assert "есть сигнал оплаты" in result.reasons
+
+
+def test_accepts_freelancehunt_parser_task_with_eur_budget():
+    post = make_post("Потрібно зробити парсер відкритого каталогу товарів. 150EUR за готовий результат.")
+
+    result = evaluate_post(post)
+
+    assert result.accepted is True
+    assert "автоматизация/интеграции" in result.reasons
+    assert "есть сигнал оплаты" in result.reasons
+
+
+def test_rejects_cloudflare_bot_attack_task_not_telegram_bot_work():
+    post = make_post("Необходимо настроить Cloudflare от бот-атак, консультация. 1000UAH.")
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "администрирование/защита сайта" in result.risks
+
+
 def test_accepts_one_off_content_task_with_fixed_deliverable():
     post = make_post(
         "Разовая задача: подготовить текст для лендинга Telegram-бота и описание сценариев "

@@ -15,7 +15,9 @@ POSITIVE_PATTERNS = {
     ],
     "автоматизация/интеграции": [
         r"автоматизац",
+        r"автоматизаці",
         r"интеграц",
+        r"інтеграц",
         r"\bapi\b",
         r"webhook",
         r"zapier",
@@ -115,6 +117,12 @@ NEGATIVE_PATTERNS = {
         r"туркомпан",
         r"турагент",
     ],
+    "администрирование/защита сайта": [
+        r"cloudflare",
+        r"\bddos\b",
+        r"бот[-\s]?атак",
+        r"bot[-\s]?attack",
+    ],
     "контент/smm/маркетинг": [
         r"\bsmm\b",
         r"контент[-\s]?план",
@@ -181,7 +189,14 @@ def evaluate_post(post: Post) -> MatchResult:
         if any(re.search(pattern, text) for pattern in patterns):
             reasons.append(reason)
 
-    has_money_signal = bool(re.search(r"(\d[\d\s]{2,}\s*(₽|руб|р\.|k|к))|бюджет|оплат", text))
+    has_money_signal = bool(
+        re.search(
+            r"(\d[\d\s]{2,}\s*(₽|руб|р\.|uah|грн|₴|usd|\$|eur|€|pln|zł|k|к))|"
+            r"((₽|₴|\$|€)\s*\d[\d\s]{2,})|"
+            r"бюджет|оплат",
+            text,
+        )
+    )
     if has_money_signal:
         reasons.append("есть сигнал оплаты")
 

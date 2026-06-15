@@ -26,12 +26,16 @@
     <string>orders/seen_posts.json</string>
     <key>ORDERS_PATH</key>
     <string>orders</string>
+    <key>RSS_FEEDS</key>
+    <string>https://freelancehunt.com/projects.rss</string>
     <key>AUTO_MODE</key>
     <string>autopilot</string>
     <key>AUTO_MAX_PRICE_RUB</key>
     <string>15000</string>
     <key>OPENAI_MODEL</key>
     <string>gpt-4.1-mini</string>
+    <key>OPENAI_BASE_URL</key>
+    <string>https://api.artemox.com/v1</string>
   </dict>
 
   <key>RunAtLoad</key>
