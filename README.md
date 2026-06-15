@@ -13,7 +13,7 @@
 - Если заказ пришел с Freelancehunt и задан `FREELANCEHUNT_API_TOKEN`, кнопка `Одобрить отклик` отправляет первый отклик через официальный API Freelancehunt.
 - Если включен `AUTO_CONVERSATION_ENABLED`, локальный агент читает входящие треды Freelancehunt, сохраняет переписку в папку заказа, готовит AI-черновик ответа и уведомляет Telegram.
 - Если включен `AUTO_REPLY_ENABLED`, безопасные последующие ответы отправляются заказчику на Freelancehunt автоматически.
-- Если включен `AUTO_EXECUTION_ENABLED`, агент создает рабочий пакет выполнения в папке заказа.
+- Если включен `AUTO_EXECUTION_ENABLED`, агент создает рабочий пакет выполнения и стартовые артефакты результата в папке заказа.
 - Уже просмотренные посты сохраняются в `data/seen_posts.json`, чтобы не было дублей.
 - Первый запуск только запоминает текущие посты и ничего не отправляет, чтобы не заспамить старыми вакансиями.
 
@@ -110,7 +110,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AUTO_CONVERSATION_ENABLED` - разрешает читать входящие треды Freelancehunt, сохранять их в `conversation.md`/`inbox/`, готовить AI-черновик ответа в `outbox/` и уведомлять Telegram. По умолчанию выключено.
 - `AUTO_REPLY_ENABLED` - разрешает агенту самому отправлять безопасные последующие ответы в тред Freelancehunt. По умолчанию выключено.
 - `AUTO_REPLY_DAILY_LIMIT` - дневной лимит автоответов в треды. По умолчанию `10`.
-- `AUTO_EXECUTION_ENABLED` - создает рабочий пакет выполнения в `execution/` после ответа заказчика. По умолчанию выключено.
+- `AUTO_EXECUTION_ENABLED` - создает рабочий пакет выполнения в `execution/` после ответа заказчика: контекст, чеклист, заметки и стартовые файлы результата. По умолчанию выключено.
 - `FREELANCEHUNT_API_TOKEN` - API-токен Freelancehunt для отправки отклика через `POST /v2/projects/{project_id}/bids`.
 - `FREELANCEHUNT_BID_SAFE_TYPE` - тип безопасной сделки Freelancehunt: `employer`, `developer`, `split` или `employer_cashless`. По умолчанию `employer`.
 - `FREELANCEHUNT_BID_DAYS` - срок выполнения в днях для первого отклика. По умолчанию `2`.
@@ -124,7 +124,11 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `outbox/customer_message.md` - сообщение заказчику для отправки.
 - `outbox/freelancehunt_reply_<thread_id>.md` - AI-черновик ответа на входящее сообщение Freelancehunt.
 - `outbox/freelancehunt_reply_<thread_id>.sent.json` - запись реально отправленного автоответа.
-- `execution/` - рабочий пакет выполнения: контекст, чеклист и заметки по заказу.
+- `execution/` - рабочий пакет выполнения: контекст, чеклист, заметки и стартовые артефакты результата.
+  - `execution/starter/bot.py` для Telegram-ботов.
+  - `execution/starter/parser.py` для парсеров/автоматизаций.
+  - `execution/drafts/spreadsheet_spec.md` для таблиц/дашбордов.
+  - `execution/drafts/content_draft.md` для текстов/контента.
 
 Проверка готовности бирж, переписки и платежей:
 

@@ -12,6 +12,7 @@ def prepare_execution_workspace(*, store: OrderStore, order: Order) -> Path:
     _write_if_missing(execution_dir / "context.md", _context_markdown(order))
     _write_if_missing(execution_dir / "checklist.md", _checklist_markdown(order))
     _write_if_missing(execution_dir / "notes.md", _notes_markdown(order))
+    _write_starter_artifacts(execution_dir, order)
     return execution_dir
 
 
@@ -39,17 +40,40 @@ def _context_markdown(order: Order) -> str:
 
 
 def _checklist_markdown(order: Order) -> str:
-    lower_category = order.category.lower()
-    lower_text = order.original_text.lower()
-    if "telegram" in lower_category or "бот" in lower_category or "telegram" in lower_text:
+    kind = _execution_kind(order)
+    if kind == "telegram_bot":
         body = _telegram_bot_checklist()
-    elif "таблиц" in lower_category or "дашборд" in lower_category or "excel" in lower_text or "google sheets" in lower_text:
+    elif kind == "spreadsheet":
         body = _spreadsheet_checklist()
-    elif "текст" in lower_category or "контент" in lower_category:
+    elif kind == "content":
         body = _content_checklist()
     else:
         body = _automation_checklist()
     return f"# Чеклист выполнения\n\n{body}\n"
+
+
+def _execution_kind(order: Order) -> str:
+    lower_category = order.category.lower()
+    lower_text = order.original_text.lower()
+    if "telegram" in lower_category or "бот" in lower_category or "telegram" in lower_text:
+        return "telegram_bot"
+    if "таблиц" in lower_category or "дашборд" in lower_category or "excel" in lower_text or "google sheets" in lower_text:
+        return "spreadsheet"
+    if "текст" in lower_category or "контент" in lower_category or "стать" in lower_text:
+        return "content"
+    return "automation"
+
+
+def _write_starter_artifacts(execution_dir: Path, order: Order) -> None:
+    kind = _execution_kind(order)
+    if kind == "telegram_bot":
+        _write_telegram_bot_starter(execution_dir, order)
+    elif kind == "spreadsheet":
+        _write_spreadsheet_starter(execution_dir, order)
+    elif kind == "content":
+        _write_content_starter(execution_dir, order)
+    else:
+        _write_automation_starter(execution_dir, order)
 
 
 def _notes_markdown(order: Order) -> str:
@@ -105,4 +129,161 @@ def _content_checklist() -> str:
         "- [ ] Подготовить первый вариант текста.\n"
         "- [ ] Проверить факты, стиль и повторы.\n"
         "- [ ] Подготовить финальный файл и сообщение заказчику.\n"
+    )
+
+
+def _write_telegram_bot_starter(execution_dir: Path, order: Order) -> None:
+    starter_dir = execution_dir / "starter"
+    starter_dir.mkdir(exist_ok=True)
+    _write_if_missing(starter_dir / "requirements.txt", "python-telegram-bot==21.7\npython-dotenv==1.0.1\n")
+    _write_if_missing(starter_dir / ".env.example", "TELEGRAM_BOT_TOKEN=\n")
+    _write_if_missing(starter_dir / "README.md", _starter_readme(order, "Telegram-бот"))
+    _write_if_missing(
+        starter_dir / "bot.py",
+        '''from __future__ import annotations
+
+import logging
+import os
+
+from dotenv import load_dotenv
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+
+
+load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("Здравствуйте! Опишите заявку одним сообщением.")
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = update.message.text or ""
+    await update.message.reply_text(
+        "Заявка принята. Я свяжусь с вами после проверки данных.\\n\\n"
+        f"Ваше сообщение: {text[:500]}"
+    )
+
+
+def main() -> None:
+    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    app = Application.builder().token(token).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
+''',
+    )
+
+
+def _write_automation_starter(execution_dir: Path, order: Order) -> None:
+    starter_dir = execution_dir / "starter"
+    starter_dir.mkdir(exist_ok=True)
+    _write_if_missing(starter_dir / "requirements.txt", "requests==2.32.3\nbeautifulsoup4==4.12.3\npython-dotenv==1.0.1\n")
+    _write_if_missing(starter_dir / ".env.example", "SOURCE_URL=\nOUTPUT_PATH=output.csv\n")
+    _write_if_missing(starter_dir / "README.md", _starter_readme(order, "Автоматизация/парсер с CSV-выгрузкой"))
+    _write_if_missing(
+        starter_dir / "parser.py",
+        '''from __future__ import annotations
+
+import csv
+import os
+
+import requests
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+
+def fetch_items(source_url: str) -> list[dict[str, str]]:
+    response = requests.get(source_url, timeout=30)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
+    title = soup.title.get_text(strip=True) if soup.title else source_url
+    return [{"title": title, "url": source_url}]
+
+
+def write_csv(items: list[dict[str, str]], output_path: str) -> None:
+    fieldnames = sorted({key for item in items for key in item})
+    with open(output_path, "w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(items)
+
+
+def main() -> None:
+    source_url = os.environ["SOURCE_URL"]
+    output_path = os.environ.get("OUTPUT_PATH", "output.csv")
+    write_csv(fetch_items(source_url), output_path)
+    print(f"Saved {output_path}")
+
+
+if __name__ == "__main__":
+    main()
+''',
+    )
+
+
+def _write_spreadsheet_starter(execution_dir: Path, order: Order) -> None:
+    drafts_dir = execution_dir / "drafts"
+    drafts_dir.mkdir(exist_ok=True)
+    _write_if_missing(
+        drafts_dir / "spreadsheet_spec.md",
+        (
+            "# Структура таблицы и дашборда\n\n"
+            "## Листы\n\n"
+            "- `Данные`: сырые входные данные.\n"
+            "- `Справочники`: статусы, категории, источники.\n"
+            "- `Дашборд`: ключевые метрики и графики.\n\n"
+            "## Метрики\n\n"
+            "- Количество записей.\n"
+            "- Сумма/среднее значение по ключевым числовым полям.\n"
+            "- Динамика по датам.\n\n"
+            "## Что уточнить\n\n"
+            "- Формат исходных данных.\n"
+            "- Нужные фильтры и группировки.\n"
+            "- Кто будет обновлять таблицу.\n"
+        ),
+    )
+
+
+def _write_content_starter(execution_dir: Path, order: Order) -> None:
+    drafts_dir = execution_dir / "drafts"
+    drafts_dir.mkdir(exist_ok=True)
+    _write_if_missing(
+        drafts_dir / "content_draft.md",
+        (
+            "# Черновик текста\n\n"
+            "## Цель\n\n"
+            "Подготовить материал по ТЗ заказчика.\n\n"
+            "## Структура\n\n"
+            "1. Заголовок.\n"
+            "2. Короткое вступление.\n"
+            "3. Основные тезисы.\n"
+            "4. Вывод или призыв к действию.\n\n"
+            "## Черновик\n\n"
+            "[Текст будет доработан после уточнения темы, аудитории и тона.]\n"
+        ),
+    )
+
+
+def _starter_readme(order: Order, title: str) -> str:
+    return (
+        f"# {title}\n\n"
+        f"Заказ: {order.order_id}\n"
+        f"Источник: {order.source_url}\n\n"
+        "## Запуск\n\n"
+        "1. Создать виртуальное окружение.\n"
+        "2. Установить зависимости: `pip install -r requirements.txt`.\n"
+        "3. Скопировать `.env.example` в `.env` и заполнить значения.\n"
+        "4. Запустить основной файл.\n\n"
+        "## Важно\n\n"
+        "Не хранить токены, пароли и клиентские секреты в коде.\n"
+        "Перед сдачей проверить основной сценарий вручную.\n"
     )

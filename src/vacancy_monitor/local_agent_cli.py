@@ -391,7 +391,8 @@ def _maybe_prepare_execution_workspace(
             (
                 "Рабочий пакет выполнения создан.\n\n"
                 f"ID: {order.order_id}\n"
-                f"Папка: {path.relative_to(store.order_dir(order.order_id))}"
+                f"Папка: {path.relative_to(store.order_dir(order.order_id))}\n"
+                "Внутри: context.md, checklist.md, notes.md и стартовые артефакты результата."
             ),
         )
 

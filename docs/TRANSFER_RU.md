@@ -37,7 +37,7 @@
 - `AUTO_OUTREACH_ENABLED=true` - агент может сам отправлять первый безопасный отклик на Freelancehunt.
 - `AUTO_CONVERSATION_ENABLED=true` - агент читает входящие треды Freelancehunt, сохраняет переписку, готовит AI-черновик ответа и уведомляет Telegram.
 - `AUTO_REPLY_ENABLED=true` - агент сам отправляет безопасные последующие ответы в тред Freelancehunt.
-- `AUTO_EXECUTION_ENABLED=true` - агент создает рабочий пакет выполнения после ответа заказчика.
+- `AUTO_EXECUTION_ENABLED=true` - агент создает рабочий пакет выполнения и стартовые артефакты результата после ответа заказчика.
 
 AI-слой пишет:
 
@@ -49,6 +49,10 @@ AI-слой пишет:
 - `orders/<order_id>/outbox/freelancehunt_reply_<thread_id>.md`.
 - `orders/<order_id>/outbox/freelancehunt_reply_<thread_id>.sent.json`.
 - `orders/<order_id>/execution/`.
+  - `execution/starter/bot.py` для Telegram-ботов.
+  - `execution/starter/parser.py` для парсеров/автоматизаций.
+  - `execution/drafts/spreadsheet_spec.md` для таблиц/дашбордов.
+  - `execution/drafts/content_draft.md` для текстов/контента.
 
 Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true` и блокируется safety-фильтром при риск-флагах, паролях, обходах лимитов, накрутках и оплате вне безопасной сделки. Отправка результата и принятие оплаты остаются точками подтверждения.
 

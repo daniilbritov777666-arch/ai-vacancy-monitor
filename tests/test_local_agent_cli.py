@@ -477,6 +477,7 @@ def test_run_local_agent_prepares_execution_workspace_after_customer_reply(tmp_p
 
     execution_dir = store.order_dir(order.order_id) / "execution"
     assert (execution_dir / "checklist.md").exists()
+    assert (execution_dir / "starter" / "bot.py").exists()
     assert any("Рабочий пакет выполнения создан" in message for message, _ in sent)
 
 
