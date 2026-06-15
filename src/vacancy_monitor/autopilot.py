@@ -8,6 +8,7 @@ from pathlib import Path
 
 import requests
 
+from vacancy_monitor.freelancehunt import FreelancehuntThreadMessage
 from vacancy_monitor.order_models import Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
 
@@ -52,6 +53,26 @@ class OpenAIResponsesClient:
                 raise
         return self._analyze_order_with_chat_completions(order)
 
+    def draft_thread_reply(self, order: Order, messages: list[FreelancehuntThreadMessage]) -> str:
+        try:
+            response = self._post_with_retry(
+                lambda: requests.post(
+                    f"{self.base_url}/responses",
+                    headers=self._headers(),
+                    json={
+                        "model": self.model,
+                        "input": _build_reply_input(order, messages),
+                    },
+                    timeout=60,
+                )
+            )
+            response.raise_for_status()
+            return _normalize_text(_extract_output_text(response.json()))
+        except requests.HTTPError as exc:
+            if not _should_fallback_to_chat(exc):
+                raise
+        return self._draft_thread_reply_with_chat_completions(order, messages)
+
     def _headers(self) -> dict:
         return {
             "Authorization": f"Bearer {self.api_key}",
@@ -74,6 +95,23 @@ class OpenAIResponsesClient:
         )
         response.raise_for_status()
         return _parse_autopilot_result(_extract_chat_content(response.json()))
+
+    def _draft_thread_reply_with_chat_completions(self, order: Order, messages: list[FreelancehuntThreadMessage]) -> str:
+        prompt = _build_reply_input(order, messages)
+        response = self._post_with_retry(
+            lambda: requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json={
+                    "model": self.model,
+                    "messages": prompt,
+                    "temperature": 0.2,
+                },
+                timeout=60,
+            )
+        )
+        response.raise_for_status()
+        return _normalize_text(_extract_chat_content(response.json()))
 
     def _post_with_retry(self, send: Callable[[], requests.Response]) -> requests.Response:
         last_exc: requests.RequestException | None = None
@@ -246,6 +284,35 @@ def _build_chat_messages(order: Order) -> list[dict]:
                 "Верни только валидный JSON-объект без Markdown. Обязательные ключи: "
                 "safe_to_autopilot, risk_flags, summary_ru, outreach_ru, execution_plan_ru, "
                 "price_rub, deadline_ru, deliverable_markdown, customer_message_ru."
+            ),
+        },
+    ]
+
+
+def _build_reply_input(order: Order, messages: list[FreelancehuntThreadMessage]) -> list[dict]:
+    transcript = "\n".join(
+        f"{'Мы' if message.is_own else 'Заказчик'}"
+        f"{' (' + message.created_at + ')' if message.created_at else ''}: {message.text}"
+        for message in messages
+        if message.text
+    )
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Ты помощник фрилансера по разовым IT-заказам. Пиши коротко, по-русски, деловым тоном. "
+                "Не обещай оплату вне безопасной сделки, не проси пароли в переписке, не соглашайся на серые задачи. "
+                "Если не хватает данных, задай 1-3 конкретных вопроса. Не используй Markdown."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Заказ: {order.category}\n"
+                f"Ссылка: {order.source_url}\n"
+                f"Исходное ТЗ:\n{order.original_text}\n\n"
+                f"История переписки:\n{transcript or '[нет сообщений]'}\n\n"
+                "Подготовь ответ заказчику от первого лица. Текст должен быть готов к отправке."
             ),
         },
     ]

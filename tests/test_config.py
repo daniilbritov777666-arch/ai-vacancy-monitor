@@ -69,3 +69,13 @@ def test_auto_outreach_config_reads_env(monkeypatch):
 
     assert config.auto_outreach_enabled is True
     assert config.auto_outreach_daily_limit == 4
+
+
+def test_conversation_config_reads_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("AUTO_CONVERSATION_ENABLED", "true")
+
+    config = Config.from_env()
+
+    assert config.auto_conversation_enabled is True

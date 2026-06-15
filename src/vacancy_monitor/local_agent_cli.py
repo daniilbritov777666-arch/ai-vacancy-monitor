@@ -10,7 +10,18 @@ from vacancy_monitor.agent import FIRST_OUTREACH_DRAFT, handle_matched_post
 from vacancy_monitor.autopilot import OpenAIResponsesClient, run_order_autopilot
 from vacancy_monitor.cli import MonitorSummary, run_monitor
 from vacancy_monitor.config import Config
-from vacancy_monitor.freelancehunt import FreelancehuntBid, FreelancehuntClient
+from vacancy_monitor.conversation import (
+    build_thread_notification,
+    find_order_for_thread,
+    sync_thread_to_order,
+    write_thread_reply_draft,
+)
+from vacancy_monitor.freelancehunt import (
+    FreelancehuntBid,
+    FreelancehuntClient,
+    FreelancehuntThread,
+    FreelancehuntThreadMessage,
+)
 from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.order_models import Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
@@ -24,6 +35,22 @@ class AutopilotClient(Protocol):
         ...
 
 
+class ConversationReplyClient(Protocol):
+    def draft_thread_reply(self, order: Order, messages: list[FreelancehuntThreadMessage]) -> str:
+        ...
+
+
+class FreelancehuntConversationClient(Protocol):
+    def list_threads(self) -> list[FreelancehuntThread]:
+        ...
+
+    def get_thread_messages(self, thread_id: str) -> list[FreelancehuntThreadMessage]:
+        ...
+
+    def mark_thread_read(self, thread_id: str) -> dict:
+        ...
+
+
 def run_local_agent_once(
     config: Config,
     *,
@@ -32,6 +59,8 @@ def run_local_agent_once(
     send_message: Callable[..., None] | None = None,
     autopilot_client: AutopilotClient | None = None,
     send_outreach: Callable[[Order, str], None] | None = None,
+    freelancehunt_client: FreelancehuntConversationClient | None = None,
+    conversation_reply_client: ConversationReplyClient | None = None,
 ) -> MonitorSummary:
     store = OrderStore(config.orders_path)
     sender = send_message or (
@@ -87,6 +116,13 @@ def run_local_agent_once(
         sender=sender,
         send_outreach=outreach_sender,
     )
+    _sync_freelancehunt_conversations(
+        config=config,
+        store=store,
+        sender=sender,
+        freelancehunt_client=freelancehunt_client,
+        conversation_reply_client=conversation_reply_client,
+    )
     return summary
 
 
@@ -134,6 +170,86 @@ def _process_pending_auto_outreach_orders(
             sender=sender,
             send_outreach=send_outreach,
         )
+
+
+def _sync_freelancehunt_conversations(
+    *,
+    config: Config,
+    store: OrderStore,
+    sender: Callable[..., None],
+    freelancehunt_client: FreelancehuntConversationClient | None = None,
+    conversation_reply_client: ConversationReplyClient | None = None,
+) -> None:
+    if not config.auto_conversation_enabled or not config.freelancehunt_api_token:
+        return
+
+    client = freelancehunt_client or FreelancehuntClient(api_token=config.freelancehunt_api_token)
+    reply_client = conversation_reply_client
+    if reply_client is None and config.openai_api_key:
+        reply_client = OpenAIResponsesClient(
+            api_key=config.openai_api_key,
+            model=config.openai_model,
+            base_url=config.openai_base_url,
+        )
+    try:
+        threads = client.list_threads()
+    except Exception as exc:
+        _safe_notify(sender, f"Синхронизация переписки Freelancehunt не выполнена: {type(exc).__name__}.")
+        return
+
+    for thread in threads:
+        if not thread.is_unread:
+            continue
+        order = find_order_for_thread(store, thread)
+        if order is None:
+            continue
+        try:
+            messages = client.get_thread_messages(thread.thread_id)
+            updated_order = sync_thread_to_order(store=store, order=order, thread=thread, messages=messages)
+            client.mark_thread_read(thread.thread_id)
+        except Exception as exc:
+            _safe_notify(
+                sender,
+                f"Ответ заказчика по заказу {order.order_id} не синхронизирован: {type(exc).__name__}.",
+            )
+            continue
+        _safe_notify(sender, build_thread_notification(order=updated_order, thread=thread, messages=messages))
+        _maybe_draft_thread_reply(
+            store=store,
+            order=updated_order,
+            thread=thread,
+            messages=messages,
+            sender=sender,
+            reply_client=reply_client,
+        )
+
+
+def _maybe_draft_thread_reply(
+    *,
+    store: OrderStore,
+    order: Order,
+    thread: FreelancehuntThread,
+    messages: list[FreelancehuntThreadMessage],
+    sender: Callable[..., None],
+    reply_client: ConversationReplyClient | None,
+) -> None:
+    if reply_client is None or not any((not message.is_own) and message.text for message in messages):
+        return
+    try:
+        reply_text = reply_client.draft_thread_reply(order, messages)
+        path = write_thread_reply_draft(store=store, order=order, thread=thread, reply_text=reply_text)
+    except Exception as exc:
+        _safe_notify(sender, f"AI-черновик ответа по заказу {order.order_id} не создан: {type(exc).__name__}.")
+        return
+    _safe_notify(
+        sender,
+        (
+            "AI-черновик ответа заказчику готов.\n\n"
+            f"ID: {order.order_id}\n"
+            f"Файл: {path.relative_to(store.order_dir(order.order_id))}\n\n"
+            f"{reply_text}"
+        ),
+    )
 
 
 def _maybe_run_autopilot(

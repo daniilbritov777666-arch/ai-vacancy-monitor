@@ -32,6 +32,7 @@ class Config:
     freelancehunt_bid_days: int = 2
     auto_outreach_enabled: bool = False
     auto_outreach_daily_limit: int = 3
+    auto_conversation_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -52,6 +53,7 @@ class Config:
         freelancehunt_bid_days = int(os.environ.get("FREELANCEHUNT_BID_DAYS", "2"))
         auto_outreach_enabled = os.environ.get("AUTO_OUTREACH_ENABLED", "").lower() in {"1", "true", "yes"}
         auto_outreach_daily_limit = int(os.environ.get("AUTO_OUTREACH_DAILY_LIMIT", "3"))
+        auto_conversation_enabled = os.environ.get("AUTO_CONVERSATION_ENABLED", "").lower() in {"1", "true", "yes"}
 
         if not bot_token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
@@ -80,6 +82,7 @@ class Config:
             freelancehunt_bid_days=freelancehunt_bid_days,
             auto_outreach_enabled=auto_outreach_enabled,
             auto_outreach_daily_limit=auto_outreach_daily_limit,
+            auto_conversation_enabled=auto_conversation_enabled,
         )
 
 

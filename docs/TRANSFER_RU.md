@@ -34,6 +34,8 @@
 - `AUTO_MODE=off` - только поиск заказов и кнопки в Telegram.
 - `AUTO_MODE=draft` - AI готовит файлы в папке заказа, но статус заказа не продвигает.
 - `AUTO_MODE=autopilot` - AI готовит файлы и переводит безопасный заказ в `draft_ready`, если цена не выше `AUTO_MAX_PRICE_RUB`.
+- `AUTO_OUTREACH_ENABLED=true` - агент может сам отправлять первый безопасный отклик на Freelancehunt.
+- `AUTO_CONVERSATION_ENABLED=true` - агент читает входящие треды Freelancehunt, сохраняет переписку, готовит AI-черновик ответа и уведомляет Telegram.
 
 AI-слой пишет:
 
@@ -42,8 +44,9 @@ AI-слой пишет:
 - `orders/<order_id>/autopilot/execution_plan.md`;
 - `orders/<order_id>/deliverables/autopilot_result.md`;
 - `orders/<order_id>/outbox/customer_message.md`.
+- `orders/<order_id>/outbox/freelancehunt_reply_<thread_id>.md`.
 
-Важно: агент не отправляет сообщения заказчику напрямую на бирже или в стороннем мессенджере, пока не подключен разрешенный канал отправки. Сейчас он готовит сообщение в `outbox/customer_message.md` и уведомляет в Telegram.
+Важно: автоматическая отправка последующих сообщений заказчику пока не включена. Сейчас агент сам отправляет только безопасный первый отклик на Freelancehunt, читает входящие ответы, сохраняет переписку, готовит AI-черновик ответа и уведомляет в Telegram.
 
 ## Быстрый запуск на новом Mac
 
