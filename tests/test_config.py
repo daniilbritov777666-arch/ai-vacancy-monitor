@@ -87,9 +87,11 @@ def test_auto_reply_and_execution_config_reads_env(monkeypatch):
     monkeypatch.setenv("AUTO_REPLY_ENABLED", "true")
     monkeypatch.setenv("AUTO_REPLY_DAILY_LIMIT", "7")
     monkeypatch.setenv("AUTO_EXECUTION_ENABLED", "true")
+    monkeypatch.setenv("AUTO_EXECUTION_DRAFT_ENABLED", "true")
 
     config = Config.from_env()
 
     assert config.auto_reply_enabled is True
     assert config.auto_reply_daily_limit == 7
     assert config.auto_execution_enabled is True
+    assert config.auto_execution_draft_enabled is True

@@ -17,7 +17,7 @@ from vacancy_monitor.conversation import (
     write_thread_reply_draft,
     write_thread_reply_sent_record,
 )
-from vacancy_monitor.execution import prepare_execution_workspace
+from vacancy_monitor.execution import ExecutionDraftPackage, prepare_execution_workspace, write_execution_draft_package
 from vacancy_monitor.freelancehunt import (
     FreelancehuntBid,
     FreelancehuntClient,
@@ -39,6 +39,16 @@ class AutopilotClient(Protocol):
 
 class ConversationReplyClient(Protocol):
     def draft_thread_reply(self, order: Order, messages: list[FreelancehuntThreadMessage]) -> str:
+        ...
+
+
+class ExecutionDraftClient(Protocol):
+    def draft_execution_package(
+        self,
+        order: Order,
+        conversation_text: str,
+        execution_context: str,
+    ) -> ExecutionDraftPackage:
         ...
 
 
@@ -66,6 +76,7 @@ def run_local_agent_once(
     send_outreach: Callable[[Order, str], None] | None = None,
     freelancehunt_client: FreelancehuntConversationClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
+    execution_draft_client: ExecutionDraftClient | None = None,
 ) -> MonitorSummary:
     store = OrderStore(config.orders_path)
     sender = send_message or (
@@ -127,6 +138,7 @@ def run_local_agent_once(
         sender=sender,
         freelancehunt_client=freelancehunt_client,
         conversation_reply_client=conversation_reply_client,
+        execution_draft_client=execution_draft_client,
     )
     return summary
 
@@ -184,6 +196,7 @@ def _sync_freelancehunt_conversations(
     sender: Callable[..., None],
     freelancehunt_client: FreelancehuntConversationClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
+    execution_draft_client: ExecutionDraftClient | None = None,
 ) -> None:
     if not config.auto_conversation_enabled or not config.freelancehunt_api_token:
         return
@@ -192,6 +205,13 @@ def _sync_freelancehunt_conversations(
     reply_client = conversation_reply_client
     if reply_client is None and config.openai_api_key:
         reply_client = OpenAIResponsesClient(
+            api_key=config.openai_api_key,
+            model=config.openai_model,
+            base_url=config.openai_base_url,
+        )
+    draft_client = execution_draft_client
+    if draft_client is None and config.openai_api_key:
+        draft_client = OpenAIResponsesClient(
             api_key=config.openai_api_key,
             model=config.openai_model,
             base_url=config.openai_base_url,
@@ -234,6 +254,7 @@ def _sync_freelancehunt_conversations(
             store=store,
             order=updated_order,
             sender=sender,
+            execution_draft_client=draft_client,
         )
 
 
@@ -379,6 +400,7 @@ def _maybe_prepare_execution_workspace(
     store: OrderStore,
     order: Order,
     sender: Callable[..., None],
+    execution_draft_client: ExecutionDraftClient | None,
 ) -> None:
     if not config.auto_execution_enabled:
         return
@@ -395,6 +417,62 @@ def _maybe_prepare_execution_workspace(
                 "Внутри: context.md, checklist.md, notes.md и стартовые артефакты результата."
             ),
         )
+    _maybe_generate_execution_draft(
+        config=config,
+        store=store,
+        order=order,
+        sender=sender,
+        execution_draft_client=execution_draft_client,
+    )
+
+
+def _maybe_generate_execution_draft(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    sender: Callable[..., None],
+    execution_draft_client: ExecutionDraftClient | None,
+) -> None:
+    if not config.auto_execution_draft_enabled or execution_draft_client is None:
+        return
+    order_dir = store.order_dir(order.order_id)
+    generated_dir = order_dir / "execution" / "generated"
+    if generated_dir.exists() and any(generated_dir.iterdir()):
+        return
+    try:
+        conversation_text = _read_optional_text(order_dir / "conversation.md")
+        execution_context = _read_execution_context(order_dir / "execution")
+        package = execution_draft_client.draft_execution_package(order, conversation_text, execution_context)
+        written = write_execution_draft_package(store=store, order=order, package=package)
+    except Exception as exc:
+        _safe_notify(sender, f"AI-пакет результата по заказу {order.order_id} не создан: {type(exc).__name__}.")
+        return
+    _safe_notify(
+        sender,
+        (
+            "AI-пакет результата подготовлен.\n\n"
+            f"ID: {order.order_id}\n"
+            f"Файлов: {len(written)}\n"
+            "Результат лежит в execution/generated/, сообщение заказчику - в outbox/delivery_message.md."
+        ),
+    )
+
+
+def _read_execution_context(execution_dir) -> str:
+    parts = []
+    for name in ("context.md", "checklist.md", "notes.md"):
+        text = _read_optional_text(execution_dir / name)
+        if text:
+            parts.append(f"# {name}\n\n{text}")
+    return "\n\n".join(parts)
+
+
+def _read_optional_text(path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def _maybe_run_autopilot(

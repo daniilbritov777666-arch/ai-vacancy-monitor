@@ -8,6 +8,7 @@ from pathlib import Path
 
 import requests
 
+from vacancy_monitor.execution import ExecutionDraftPackage
 from vacancy_monitor.freelancehunt import FreelancehuntThreadMessage
 from vacancy_monitor.order_models import Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
@@ -73,6 +74,32 @@ class OpenAIResponsesClient:
                 raise
         return self._draft_thread_reply_with_chat_completions(order, messages)
 
+    def draft_execution_package(
+        self,
+        order: Order,
+        conversation_text: str,
+        execution_context: str,
+    ) -> ExecutionDraftPackage:
+        try:
+            response = self._post_with_retry(
+                lambda: requests.post(
+                    f"{self.base_url}/responses",
+                    headers=self._headers(),
+                    json={
+                        "model": self.model,
+                        "input": _build_execution_input(order, conversation_text, execution_context),
+                        "text": {"format": _execution_json_schema_format()},
+                    },
+                    timeout=90,
+                )
+            )
+            response.raise_for_status()
+            return _parse_execution_package(_extract_output_text(response.json()))
+        except requests.HTTPError as exc:
+            if not _should_fallback_to_chat(exc):
+                raise
+        return self._draft_execution_package_with_chat_completions(order, conversation_text, execution_context)
+
     def _headers(self) -> dict:
         return {
             "Authorization": f"Bearer {self.api_key}",
@@ -112,6 +139,29 @@ class OpenAIResponsesClient:
         )
         response.raise_for_status()
         return _normalize_text(_extract_chat_content(response.json()))
+
+    def _draft_execution_package_with_chat_completions(
+        self,
+        order: Order,
+        conversation_text: str,
+        execution_context: str,
+    ) -> ExecutionDraftPackage:
+        prompt = _build_execution_chat_messages(order, conversation_text, execution_context)
+        response = self._post_with_retry(
+            lambda: requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json={
+                    "model": self.model,
+                    "messages": prompt,
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.2,
+                },
+                timeout=90,
+            )
+        )
+        response.raise_for_status()
+        return _parse_execution_package(_extract_chat_content(response.json()))
 
     def _post_with_retry(self, send: Callable[[], requests.Response]) -> requests.Response:
         last_exc: requests.RequestException | None = None
@@ -227,6 +277,18 @@ def _parse_autopilot_result(raw_text: str) -> AutopilotResult:
     return AutopilotResult(**payload)
 
 
+def _parse_execution_package(raw_text: str) -> ExecutionDraftPackage:
+    payload = json.loads(raw_text)
+    files = payload.get("files") or {}
+    if not isinstance(files, dict):
+        files = {}
+    return ExecutionDraftPackage(
+        summary_ru=_normalize_text(payload.get("summary_ru", "")),
+        files={str(name): _normalize_text(content) for name, content in files.items()},
+        delivery_message_ru=_normalize_text(payload.get("delivery_message_ru", "")),
+    )
+
+
 def _normalize_text(value: object) -> str:
     if isinstance(value, list):
         lines = []
@@ -318,6 +380,47 @@ def _build_reply_input(order: Order, messages: list[FreelancehuntThreadMessage])
     ]
 
 
+def _build_execution_input(order: Order, conversation_text: str, execution_context: str) -> list[dict]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Ты исполнитель разовых IT-фриланс задач. Готовь практичный deliverable-пакет на русском. "
+                "Не включай реальные секреты, токены, пароли, приватные ключи. "
+                "Если данных не хватает, создай безопасный рабочий черновик и список уточнений. "
+                "Файлы должны быть самодостаточными и не требовать опасных действий."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Категория: {order.category}\n"
+                f"Источник: {order.source_url}\n\n"
+                f"Исходное ТЗ:\n{order.original_text}\n\n"
+                f"Переписка:\n{conversation_text or '[нет переписки]'}\n\n"
+                f"Рабочий контекст:\n{execution_context or '[нет контекста]'}\n\n"
+                "Верни JSON с ключами summary_ru, files, delivery_message_ru. "
+                "files - объект имя_файла -> содержимое файла."
+            ),
+        },
+    ]
+
+
+def _build_execution_chat_messages(order: Order, conversation_text: str, execution_context: str) -> list[dict]:
+    messages = _build_execution_input(order, conversation_text, execution_context)
+    return [
+        messages[0],
+        {
+            "role": "user",
+            "content": (
+                f"{messages[1]['content']}\n\n"
+                "Верни только валидный JSON-объект без Markdown. Обязательные ключи: "
+                "summary_ru, files, delivery_message_ru."
+            ),
+        },
+    ]
+
+
 def _json_schema_format() -> dict:
     properties = {
         "safe_to_autopilot": {"type": "boolean"},
@@ -338,6 +441,27 @@ def _json_schema_format() -> dict:
             "type": "object",
             "properties": properties,
             "required": list(properties),
+            "additionalProperties": False,
+        },
+    }
+
+
+def _execution_json_schema_format() -> dict:
+    return {
+        "type": "json_schema",
+        "name": "execution_draft_package",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "summary_ru": {"type": "string"},
+                "files": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
+                "delivery_message_ru": {"type": "string"},
+            },
+            "required": ["summary_ru", "files", "delivery_message_ru"],
             "additionalProperties": False,
         },
     }

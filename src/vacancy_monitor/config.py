@@ -36,6 +36,7 @@ class Config:
     auto_reply_enabled: bool = False
     auto_reply_daily_limit: int = 10
     auto_execution_enabled: bool = False
+    auto_execution_draft_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -60,6 +61,7 @@ class Config:
         auto_reply_enabled = os.environ.get("AUTO_REPLY_ENABLED", "").lower() in {"1", "true", "yes"}
         auto_reply_daily_limit = int(os.environ.get("AUTO_REPLY_DAILY_LIMIT", "10"))
         auto_execution_enabled = os.environ.get("AUTO_EXECUTION_ENABLED", "").lower() in {"1", "true", "yes"}
+        auto_execution_draft_enabled = os.environ.get("AUTO_EXECUTION_DRAFT_ENABLED", "").lower() in {"1", "true", "yes"}
 
         if not bot_token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
@@ -92,6 +94,7 @@ class Config:
             auto_reply_enabled=auto_reply_enabled,
             auto_reply_daily_limit=auto_reply_daily_limit,
             auto_execution_enabled=auto_execution_enabled,
+            auto_execution_draft_enabled=auto_execution_draft_enabled,
         )
 
 

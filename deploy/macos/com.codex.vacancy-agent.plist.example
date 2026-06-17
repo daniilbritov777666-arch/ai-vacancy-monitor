@@ -44,6 +44,8 @@
     <string>10</string>
     <key>AUTO_EXECUTION_ENABLED</key>
     <string>true</string>
+    <key>AUTO_EXECUTION_DRAFT_ENABLED</key>
+    <string>true</string>
     <key>OPENAI_MODEL</key>
     <string>gpt-4.1-mini</string>
     <key>OPENAI_BASE_URL</key>

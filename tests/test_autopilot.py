@@ -7,6 +7,7 @@ from vacancy_monitor.autopilot import (
     OpenAIResponsesClient,
     run_order_autopilot,
 )
+from vacancy_monitor.execution import ExecutionDraftPackage
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
@@ -104,6 +105,26 @@ def safe_chat_payload():
     return {"choices": [{"message": {"content": json.dumps(data, ensure_ascii=False)}}]}
 
 
+def execution_payload():
+    data = {
+        "summary_ru": "Собран рабочий пакет Telegram-бота.",
+        "files": {"bot.py": "print('bot ready')\n"},
+        "delivery_message_ru": "Здравствуйте! Подготовил первый вариант.",
+    }
+    return {
+        "output": [
+            {
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(data, ensure_ascii=False),
+                    }
+                ]
+            }
+        ]
+    }
+
+
 def test_openai_responses_client_sends_schema_payload(monkeypatch):
     calls = []
 
@@ -184,6 +205,29 @@ def test_openai_client_normalizes_list_execution_plan_from_chat(monkeypatch):
     result = client.analyze_order(make_order())
 
     assert result.execution_plan_ru == "1. Уточнить объем.\n2. Подготовить результат."
+
+
+def test_openai_client_drafts_execution_package(monkeypatch):
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return Response(execution_payload())
+
+    monkeypatch.setattr("vacancy_monitor.autopilot.requests.post", fake_post)
+    client = OpenAIResponsesClient(api_key="sk-test", model="gpt-test", base_url="https://api.example.com/v1")
+
+    result = client.draft_execution_package(
+        make_order(),
+        conversation_text="Заказчик: можно начинать.",
+        execution_context="context/checklist",
+    )
+
+    assert isinstance(result, ExecutionDraftPackage)
+    assert result.files["bot.py"] == "print('bot ready')"
+    assert "первый вариант" in result.delivery_message_ru
+    assert calls[0]["url"] == "https://api.example.com/v1/responses"
+    assert calls[0]["json"]["text"]["format"]["name"] == "execution_draft_package"
 
 
 def test_run_order_autopilot_writes_files_and_moves_safe_order_to_draft_ready(tmp_path):

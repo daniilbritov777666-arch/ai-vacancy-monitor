@@ -1,4 +1,4 @@
-from vacancy_monitor.execution import prepare_execution_workspace
+from vacancy_monitor.execution import ExecutionDraftPackage, prepare_execution_workspace, write_execution_draft_package
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import make_order_from_post
 from vacancy_monitor.order_store import OrderStore
@@ -118,3 +118,41 @@ def test_prepare_execution_workspace_creates_spreadsheet_spec(tmp_path):
 
     assert (path / "drafts" / "spreadsheet_spec.md").exists()
     assert "Структура таблицы" in (path / "drafts" / "spreadsheet_spec.md").read_text(encoding="utf-8")
+
+
+def test_write_execution_draft_package_creates_generated_files_and_delivery_message(tmp_path):
+    store = OrderStore(tmp_path / "orders")
+    order = make_order_from_post(
+        Post(
+            source="freelancehunt.com/projects.rss",
+            post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+            url="https://freelancehunt.com/project/telegram-bot/123456.html",
+            text="Нужен Telegram-бот для приема заявок.",
+            published_at="2026-06-01T12:00:00+03:00",
+        ),
+        category="Telegram-боты",
+        risks=[],
+    )
+    store.save_order(order)
+    prepare_execution_workspace(store=store, order=order)
+
+    paths = write_execution_draft_package(
+        store=store,
+        order=order,
+        package=ExecutionDraftPackage(
+            summary_ru="Собран каркас Telegram-бота.",
+            files={
+                "bot.py": "print('bot')\n",
+                "../secret.txt": "must stay inside generated\n",
+            },
+            delivery_message_ru="Здравствуйте! Подготовил первый рабочий вариант.",
+        ),
+    )
+
+    generated_dir = store.order_dir(order.order_id) / "execution" / "generated"
+    assert generated_dir / "bot.py" in paths
+    assert (generated_dir / "secret.txt").exists()
+    assert not (store.order_dir(order.order_id) / "execution" / "secret.txt").exists()
+    assert "Подготовил первый рабочий вариант" in (
+        store.order_dir(order.order_id) / "outbox" / "delivery_message.md"
+    ).read_text(encoding="utf-8")

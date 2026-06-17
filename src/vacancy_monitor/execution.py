@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from vacancy_monitor.order_models import Order, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
+
+
+@dataclass(frozen=True)
+class ExecutionDraftPackage:
+    summary_ru: str
+    files: dict[str, str]
+    delivery_message_ru: str
 
 
 def prepare_execution_workspace(*, store: OrderStore, order: Order) -> Path:
@@ -16,9 +25,41 @@ def prepare_execution_workspace(*, store: OrderStore, order: Order) -> Path:
     return execution_dir
 
 
+def write_execution_draft_package(
+    *,
+    store: OrderStore,
+    order: Order,
+    package: ExecutionDraftPackage,
+) -> list[Path]:
+    order_dir = store.order_dir(order.order_id)
+    generated_dir = order_dir / "execution" / "generated"
+    outbox_dir = order_dir / "outbox"
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    outbox_dir.mkdir(parents=True, exist_ok=True)
+
+    written: list[Path] = []
+    _write_if_missing(generated_dir / "summary.md", package.summary_ru.strip() + "\n")
+    written.append(generated_dir / "summary.md")
+    for raw_name, content in package.files.items():
+        filename = _safe_generated_filename(raw_name)
+        path = generated_dir / filename
+        _write_if_missing(path, content.rstrip() + "\n")
+        written.append(path)
+    (outbox_dir / "delivery_message.md").write_text(package.delivery_message_ru.strip() + "\n", encoding="utf-8")
+    return written
+
+
 def _write_if_missing(path: Path, text: str) -> None:
     if not path.exists():
         path.write_text(text, encoding="utf-8")
+
+
+def _safe_generated_filename(value: str) -> str:
+    name = Path(value).name.strip() or "result.md"
+    name = re.sub(r"[^a-zA-Z0-9._-]+", "_", name)
+    if name in {".", "..", ""}:
+        return "result.md"
+    return name
 
 
 def _context_markdown(order: Order) -> str:
