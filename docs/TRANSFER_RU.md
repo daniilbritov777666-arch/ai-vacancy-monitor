@@ -41,6 +41,9 @@
 - `AUTO_EXECUTION_DRAFT_ENABLED=true` - агент генерирует AI-пакет результата в `execution/generated/` и сообщение сдачи в `outbox/delivery_message.md`.
 - `AUTO_DELIVERY_ENABLED=true` - агент сам отправляет безопасный результат заказчику после генерации AI-пакета и переводит заказ в `payment_requested`.
 - `AUTO_DELIVERY_DAILY_LIMIT=5` - дневной лимит автосдачи результатов.
+- `AUTO_PAYMENT_WATCH_ENABLED=true` - агент проверяет workspace-статусы Freelancehunt и закрывает локальный заказ после оплаты/приемки.
+- `AUTO_REVISION_ENABLED=true` - агент сам обрабатывает безопасные правки после сдачи результата.
+- `AUTO_REVISION_DAILY_LIMIT=5` - дневной лимит автоматических правок.
 - Если автосдача заблокирована safety-фильтром, агент присылает карточку проверки в Telegram. Кнопка `Разрешить отправку` остается ручным fallback.
 
 AI-слой пишет:
@@ -61,8 +64,11 @@ AI-слой пишет:
 - `orders/<order_id>/outbox/delivery_message.md`.
 - `orders/<order_id>/outbox/delivery_approval_requested.json`.
 - `orders/<order_id>/outbox/delivery_message.sent.json`.
+- `orders/<order_id>/payment/freelancehunt_workspace.json`.
+- `orders/<order_id>/revisions/<revision_id>/`.
+- `orders/<order_id>/revisions/manual_review_required.json`.
 
-Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`. Оба действия блокируются safety-фильтром при риск-флагах, паролях, обходах лимитов, накрутках и оплате вне безопасной сделки. Принятие оплаты остается точкой подтверждения, пока биржа или платежная система не отдают агенту надежный статус оплаты через API.
+Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher оплаты - через `AUTO_PAYMENT_WATCH_ENABLED=true`. Действия с текстом блокируются safety-фильтром при риск-флагах, паролях, обходах лимитов, накрутках и оплате вне безопасной сделки. Закрытие заказа выполняется только по статусу workspace/сделки из API Freelancehunt.
 
 ## Быстрый запуск на новом Mac
 

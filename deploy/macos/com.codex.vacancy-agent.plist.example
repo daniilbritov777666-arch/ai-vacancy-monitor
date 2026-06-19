@@ -50,6 +50,12 @@
     <string>true</string>
     <key>AUTO_DELIVERY_DAILY_LIMIT</key>
     <string>5</string>
+    <key>AUTO_PAYMENT_WATCH_ENABLED</key>
+    <string>true</string>
+    <key>AUTO_REVISION_ENABLED</key>
+    <string>true</string>
+    <key>AUTO_REVISION_DAILY_LIMIT</key>
+    <string>5</string>
     <key>OPENAI_MODEL</key>
     <string>gpt-4.1-mini</string>
     <key>OPENAI_BASE_URL</key>

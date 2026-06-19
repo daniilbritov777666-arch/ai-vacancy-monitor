@@ -58,6 +58,8 @@ def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
     assert config.auto_execution_enabled is True
     assert config.auto_execution_draft_enabled is True
     assert config.auto_delivery_enabled is True
+    assert config.auto_payment_watch_enabled is True
+    assert config.auto_revision_enabled is True
 
 
 def test_autopilot_mode_allows_explicit_autonomous_flag_override(monkeypatch):
@@ -65,11 +67,13 @@ def test_autopilot_mode_allows_explicit_autonomous_flag_override(monkeypatch):
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
     monkeypatch.setenv("AUTO_MODE", "autopilot")
     monkeypatch.setenv("AUTO_DELIVERY_ENABLED", "false")
+    monkeypatch.setenv("AUTO_REVISION_ENABLED", "false")
 
     config = Config.from_env()
 
     assert config.auto_outreach_enabled is True
     assert config.auto_delivery_enabled is False
+    assert config.auto_revision_enabled is False
 
 
 def test_freelancehunt_config_reads_env(monkeypatch):
@@ -117,6 +121,9 @@ def test_auto_reply_and_execution_config_reads_env(monkeypatch):
     monkeypatch.setenv("AUTO_EXECUTION_DRAFT_ENABLED", "true")
     monkeypatch.setenv("AUTO_DELIVERY_ENABLED", "true")
     monkeypatch.setenv("AUTO_DELIVERY_DAILY_LIMIT", "2")
+    monkeypatch.setenv("AUTO_PAYMENT_WATCH_ENABLED", "true")
+    monkeypatch.setenv("AUTO_REVISION_ENABLED", "true")
+    monkeypatch.setenv("AUTO_REVISION_DAILY_LIMIT", "3")
 
     config = Config.from_env()
 
@@ -126,3 +133,6 @@ def test_auto_reply_and_execution_config_reads_env(monkeypatch):
     assert config.auto_execution_draft_enabled is True
     assert config.auto_delivery_enabled is True
     assert config.auto_delivery_daily_limit == 2
+    assert config.auto_payment_watch_enabled is True
+    assert config.auto_revision_enabled is True
+    assert config.auto_revision_daily_limit == 3

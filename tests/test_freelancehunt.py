@@ -46,6 +46,21 @@ class FakeSession:
                 },
                 status_code=200,
             )
+        if url.endswith("/my/workspaces/projects"):
+            return FakeResponse(
+                {
+                    "data": [
+                        {
+                            "id": "workspace-1",
+                            "attributes": {"status": "completed"},
+                            "relationships": {
+                                "project": {"data": {"id": "123456"}},
+                            },
+                        }
+                    ]
+                },
+                status_code=200,
+            )
         return FakeResponse(
             {
                 "data": [
@@ -146,3 +161,16 @@ def test_freelancehunt_client_adds_thread_message():
 
     assert session.calls[0]["url"] == "https://api.freelancehunt.com/v2/threads/thread-1"
     assert session.calls[0]["json"] == {"message_html": "Здравствуйте! Начать могу сегодня."}
+
+
+def test_freelancehunt_client_lists_project_workspaces():
+    session = FakeSession()
+    client = FreelancehuntClient(api_token="fh-token", session=session)
+
+    workspaces = client.list_project_workspaces()
+
+    assert len(workspaces) == 1
+    assert workspaces[0].workspace_id == "workspace-1"
+    assert workspaces[0].project_id == "123456"
+    assert workspaces[0].status == "completed"
+    assert session.calls[0]["url"] == "https://api.freelancehunt.com/v2/my/workspaces/projects"

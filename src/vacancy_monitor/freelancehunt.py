@@ -42,6 +42,14 @@ class FreelancehuntThreadMessage:
     raw: dict
 
 
+@dataclass(frozen=True)
+class FreelancehuntWorkspace:
+    workspace_id: str
+    project_id: str | None
+    status: str | None
+    raw: dict
+
+
 class FreelancehuntClient:
     def __init__(self, *, api_token: str, session: Any = requests, base_url: str = API_BASE_URL):
         self.api_token = api_token
@@ -104,14 +112,14 @@ class FreelancehuntClient:
         response.raise_for_status()
         return response.json()
 
-    def list_project_workspaces(self) -> list[dict]:
+    def list_project_workspaces(self) -> list[FreelancehuntWorkspace]:
         response = self.session.get(
             f"{self.base_url}/my/workspaces/projects",
             headers=self._headers(),
             timeout=30,
         )
         response.raise_for_status()
-        return _data_list(response.json())
+        return [_workspace_from_api(item) for item in _data_list(response.json())]
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -154,6 +162,17 @@ def _message_from_api(item: dict) -> FreelancehuntThreadMessage:
         author_id=str(author.get("id")) if author.get("id") is not None else None,
         author_type=str(author.get("type")) if author.get("type") is not None else None,
         is_own=bool(attributes.get("is_own") or attributes.get("is_my")),
+        raw=item,
+    )
+
+
+def _workspace_from_api(item: dict) -> FreelancehuntWorkspace:
+    attributes = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+    return FreelancehuntWorkspace(
+        workspace_id=str(item.get("id") or attributes.get("id") or ""),
+        project_id=_extract_project_id(item),
+        status=_first_str(attributes, "status", "state", "status_name", "safe_status", "payment_status")
+        or _first_str(item, "status", "state"),
         raw=item,
     )
 

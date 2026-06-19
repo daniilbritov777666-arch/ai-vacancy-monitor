@@ -4,7 +4,7 @@ from pathlib import Path
 from vacancy_monitor.autopilot import AutopilotResult
 from vacancy_monitor.config import Config
 from vacancy_monitor.execution import ExecutionDraftPackage
-from vacancy_monitor.freelancehunt import FreelancehuntThread, FreelancehuntThreadMessage
+from vacancy_monitor.freelancehunt import FreelancehuntThread, FreelancehuntThreadMessage, FreelancehuntWorkspace
 from vacancy_monitor.local_agent_cli import (
     handle_order_callback,
     poll_telegram_once,
@@ -63,15 +63,16 @@ class FakeConversationReplyClient:
 
 
 class FakeExecutionDraftClient:
-    def __init__(self):
+    def __init__(self, *, delivery_message: str = "Здравствуйте! Подготовил рабочий вариант для проверки."):
         self.calls = []
+        self.delivery_message = delivery_message
 
     def draft_execution_package(self, order, conversation_text, execution_context):
         self.calls.append((order.order_id, conversation_text, execution_context))
         return ExecutionDraftPackage(
             summary_ru="Подготовлен рабочий вариант Telegram-бота.",
             files={"bot.py": "print('ready bot')\n"},
-            delivery_message_ru="Здравствуйте! Подготовил рабочий вариант для проверки.",
+            delivery_message_ru=self.delivery_message,
         )
 
 
@@ -81,9 +82,12 @@ class FailingAutopilotClient:
 
 
 class FakeFreelancehuntConversationClient:
-    def __init__(self):
+    def __init__(self, *, messages=None, workspaces=None, unread=True):
         self.marked_read = []
         self.thread_messages = []
+        self.messages = messages
+        self.workspaces = workspaces or []
+        self.unread = unread
 
     def list_threads(self):
         return [
@@ -91,14 +95,14 @@ class FakeFreelancehuntConversationClient:
                 thread_id="thread-1",
                 project_id="123456",
                 subject="Telegram bot",
-                is_unread=True,
+                is_unread=self.unread,
                 updated_at="2026-06-15T09:00:00+03:00",
                 raw={"id": "thread-1"},
             )
         ]
 
     def get_thread_messages(self, thread_id):
-        return [
+        return self.messages or [
             FreelancehuntThreadMessage(
                 message_id="msg-1",
                 text="Здравствуйте, когда сможете начать?",
@@ -117,6 +121,9 @@ class FakeFreelancehuntConversationClient:
     def add_thread_message(self, *, thread_id, message_html):
         self.thread_messages.append((thread_id, message_html))
         return {"data": {"id": "sent-1", "type": "message"}}
+
+    def list_project_workspaces(self):
+        return self.workspaces
 
 
 def test_run_local_agent_creates_order_for_new_match(tmp_path):
@@ -669,6 +676,152 @@ def test_run_local_agent_blocks_auto_delivery_when_order_has_risks(tmp_path):
     assert conversation_client.thread_messages == []
     assert (store.order_dir(order.order_id) / "outbox" / "delivery_approval_requested.json").exists()
     assert any("Автосдача результата заблокирована" in message for message, _ in sent)
+
+
+def test_run_local_agent_closes_order_when_workspace_is_paid(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient(
+        unread=False,
+        workspaces=[
+            FreelancehuntWorkspace(
+                workspace_id="workspace-1",
+                project_id="123456",
+                status="completed",
+                raw={"id": "workspace-1", "attributes": {"status": "completed"}},
+            )
+        ],
+    )
+    config = replace(
+        make_config(tmp_path),
+        auto_payment_watch_enabled=True,
+        freelancehunt_api_token="fh-token",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.PAYMENT_REQUESTED)
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.CLOSED
+    assert (store.order_dir(order.order_id) / "payment" / "freelancehunt_workspace.json").exists()
+    assert any("Оплата или приемка подтверждена" in message for message, _ in sent)
+
+
+def test_run_local_agent_auto_processes_revision_request_after_delivery(tmp_path):
+    sent = []
+    revision_message = FreelancehuntThreadMessage(
+        message_id="msg-revision-1",
+        text="Спасибо, нужно поправить текст кнопки и отправить обновленную версию.",
+        created_at="2026-06-15T10:00:00+03:00",
+        author_id="client-1",
+        author_type="employer",
+        is_own=False,
+        raw={"id": "msg-revision-1"},
+    )
+    conversation_client = FakeFreelancehuntConversationClient(messages=[revision_message])
+    execution_client = FakeExecutionDraftClient(delivery_message="Здравствуйте! Внес правки и отправляю обновленную версию.")
+    config = replace(
+        make_config(tmp_path),
+        auto_conversation_enabled=True,
+        auto_revision_enabled=True,
+        auto_delivery_enabled=True,
+        auto_execution_enabled=True,
+        auto_execution_draft_enabled=True,
+        freelancehunt_api_token="fh-token",
+        openai_api_key="sk-test",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.PAYMENT_REQUESTED)
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
+    assert ("thread-1", "Здравствуйте! Внес правки и отправляю обновленную версию.") in conversation_client.thread_messages
+    assert list((store.order_dir(order.order_id) / "revisions").glob("*/delivery_message.sent.json"))
+    assert any("Правки автоматически внесены" in message for message, _ in sent)
+
+
+def test_run_local_agent_blocks_unsafe_revision_request(tmp_path):
+    sent = []
+    revision_message = FreelancehuntThreadMessage(
+        message_id="msg-revision-unsafe",
+        text="Поправьте и добавьте обход лимитов API, чтобы работало без ограничений.",
+        created_at="2026-06-15T10:00:00+03:00",
+        author_id="client-1",
+        author_type="employer",
+        is_own=False,
+        raw={"id": "msg-revision-unsafe"},
+    )
+    conversation_client = FakeFreelancehuntConversationClient(messages=[revision_message])
+    execution_client = FakeExecutionDraftClient(delivery_message="Не должно отправиться.")
+    config = replace(
+        make_config(tmp_path),
+        auto_conversation_enabled=True,
+        auto_revision_enabled=True,
+        auto_delivery_enabled=True,
+        auto_execution_enabled=True,
+        auto_execution_draft_enabled=True,
+        freelancehunt_api_token="fh-token",
+        openai_api_key="sk-test",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.PAYMENT_REQUESTED)
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    assert conversation_client.thread_messages == []
+    assert execution_client.calls == []
+    assert (store.order_dir(order.order_id) / "revisions" / "manual_review_required.json").exists()
+    assert any("Автоправка заблокирована" in message for message, _ in sent)
 
 
 def test_handle_order_callback_sends_delivery_when_allowed(tmp_path):

@@ -24,6 +24,7 @@ from vacancy_monitor.freelancehunt import (
     FreelancehuntClient,
     FreelancehuntThread,
     FreelancehuntThreadMessage,
+    FreelancehuntWorkspace,
 )
 from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.order_models import Order, OrderStatus, format_moscow_time
@@ -64,6 +65,9 @@ class FreelancehuntConversationClient(Protocol):
         ...
 
     def add_thread_message(self, *, thread_id: str, message_html: str) -> dict:
+        ...
+
+    def list_project_workspaces(self) -> list[FreelancehuntWorkspace]:
         ...
 
 
@@ -143,6 +147,12 @@ def run_local_agent_once(
         execution_draft_client=execution_draft_client,
         send_delivery=send_delivery,
     )
+    _sync_freelancehunt_workspaces(
+        config=config,
+        store=store,
+        sender=sender,
+        freelancehunt_client=freelancehunt_client,
+    )
     return summary
 
 
@@ -190,6 +200,92 @@ def _process_pending_auto_outreach_orders(
             sender=sender,
             send_outreach=send_outreach,
         )
+
+
+def _sync_freelancehunt_workspaces(
+    *,
+    config: Config,
+    store: OrderStore,
+    sender: Callable[..., None],
+    freelancehunt_client: FreelancehuntConversationClient | None = None,
+) -> None:
+    if not config.auto_payment_watch_enabled or not config.freelancehunt_api_token:
+        return
+
+    client = freelancehunt_client or FreelancehuntClient(api_token=config.freelancehunt_api_token)
+    try:
+        workspaces = client.list_project_workspaces()
+    except Exception as exc:
+        _safe_notify(sender, f"Проверка статусов сделок Freelancehunt не выполнена: {type(exc).__name__}.")
+        return
+
+    for workspace in workspaces:
+        order = _find_order_for_project_id(store, workspace.project_id)
+        if order is None:
+            continue
+        _write_workspace_status(store=store, order=order, workspace=workspace)
+        if order.status == OrderStatus.PAYMENT_REQUESTED and _workspace_is_paid_or_closed(workspace):
+            updated = store.update_status(order.order_id, OrderStatus.CLOSED)
+            _safe_notify(
+                sender,
+                (
+                    "Оплата или приемка подтверждена на Freelancehunt.\n\n"
+                    f"ID: {updated.order_id}\n"
+                    f"Workspace: {workspace.workspace_id or 'не указан'}\n"
+                    f"Статус: {workspace.status or 'не указан'}\n\n"
+                    "Заказ закрыт в локальном агенте."
+                ),
+            )
+
+
+def _find_order_for_project_id(store: OrderStore, project_id: str | None) -> Order | None:
+    if not project_id:
+        return None
+    for order in store.list_orders():
+        if order.contact and order.contact.channel == "freelancehunt" and order.contact.value == project_id:
+            return order
+        if f"/{project_id}.html" in order.source_url or f"/{project_id}" in order.source_url:
+            return order
+    return None
+
+
+def _write_workspace_status(*, store: OrderStore, order: Order, workspace: FreelancehuntWorkspace) -> None:
+    path = store.order_dir(order.order_id) / "payment" / "freelancehunt_workspace.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "checked_at": format_moscow_time(),
+                "workspace_id": workspace.workspace_id,
+                "project_id": workspace.project_id,
+                "status": workspace.status,
+                "raw": workspace.raw,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _workspace_is_paid_or_closed(workspace: FreelancehuntWorkspace) -> bool:
+    text = (workspace.status or "").lower()
+    markers = [
+        "completed",
+        "complete",
+        "closed",
+        "done",
+        "finished",
+        "paid",
+        "accepted",
+        "success",
+        "выполн",
+        "закры",
+        "оплач",
+        "принят",
+    ]
+    return any(marker in text for marker in markers)
 
 
 def _sync_freelancehunt_conversations(
@@ -243,6 +339,22 @@ def _sync_freelancehunt_conversations(
             )
             continue
         _safe_notify(sender, build_thread_notification(order=updated_order, thread=thread, messages=messages))
+
+        def send_thread_delivery(order: Order, text: str, *, thread_id: str = thread.thread_id) -> None:
+            client.add_thread_message(thread_id=thread_id, message_html=text)
+
+        if _maybe_process_revision_request(
+            config=config,
+            store=store,
+            order=updated_order,
+            thread=thread,
+            messages=messages,
+            sender=sender,
+            execution_draft_client=draft_client,
+            send_delivery=send_delivery or send_thread_delivery,
+        ):
+            continue
+
         _maybe_draft_thread_reply(
             store=store,
             order=updated_order,
@@ -253,9 +365,6 @@ def _sync_freelancehunt_conversations(
             marketplace_client=client,
             config=config,
         )
-
-        def send_thread_delivery(order: Order, text: str, *, thread_id: str = thread.thread_id) -> None:
-            client.add_thread_message(thread_id=thread_id, message_html=text)
 
         _maybe_prepare_execution_workspace(
             config=config,
@@ -354,6 +463,203 @@ def _maybe_auto_send_thread_reply(
     )
 
 
+def _maybe_process_revision_request(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    thread: FreelancehuntThread,
+    messages: list[FreelancehuntThreadMessage],
+    sender: Callable[..., None],
+    execution_draft_client: ExecutionDraftClient | None,
+    send_delivery: Callable[[Order, str], None] | None,
+) -> bool:
+    if not config.auto_revision_enabled or order.status != OrderStatus.PAYMENT_REQUESTED:
+        return False
+    customer_messages = [message for message in messages if not message.is_own and message.text]
+    if not _has_revision_request(customer_messages):
+        return False
+
+    revision_text = "\n".join(message.text for message in customer_messages if message.text)
+    block_reason = _auto_revision_block_reason(
+        config=config,
+        store=store,
+        order=order,
+        messages=customer_messages,
+        execution_draft_client=execution_draft_client,
+        send_delivery=send_delivery,
+    )
+    if block_reason:
+        _write_revision_manual_review_required(store=store, order=order, thread=thread, reason=block_reason, text=revision_text)
+        _safe_notify(
+            sender,
+            (
+                "Автоправка заблокирована.\n\n"
+                f"ID: {order.order_id}\n"
+                f"Причина: {block_reason}\n\n"
+                "Запрос сохранен в revisions/manual_review_required.json."
+            ),
+        )
+        return True
+
+    order_dir = store.order_dir(order.order_id)
+    try:
+        prepare_execution_workspace(store=store, order=order)
+        conversation_text = _read_optional_text(order_dir / "conversation.md")
+        execution_context = _read_execution_context(order_dir / "execution")
+        package = execution_draft_client.draft_execution_package(
+            order,
+            conversation_text,
+            f"{execution_context}\n\n# Запрос правок\n\n{revision_text}".strip(),
+        )
+        write_execution_draft_package(store=store, order=order, package=package)
+        revision_dir = _write_revision_package(store=store, order=order, thread=thread, package=package, text=revision_text)
+        delivery_text = _read_delivery_text(store, order)
+        response_payload = send_delivery(order, delivery_text)
+        _write_revision_sent_record(revision_dir=revision_dir, text=delivery_text, response_payload=response_payload)
+    except Exception as exc:
+        _write_revision_manual_review_required(
+            store=store,
+            order=order,
+            thread=thread,
+            reason=type(exc).__name__,
+            text=revision_text,
+        )
+        _safe_notify(sender, f"Автоправка по заказу {order.order_id} не выполнена: {type(exc).__name__}.")
+        return True
+
+    store.update_status(order.order_id, OrderStatus.PAYMENT_REQUESTED)
+    _safe_notify(
+        sender,
+        (
+            "Правки автоматически внесены и отправлены заказчику.\n\n"
+            f"ID: {order.order_id}\n"
+            f"Тред: {thread.thread_id}\n"
+            "Статус: снова ожидаем оплату / приемку."
+        ),
+    )
+    return True
+
+
+def _has_revision_request(messages: list[FreelancehuntThreadMessage]) -> bool:
+    text = "\n".join(message.text for message in messages if message.text).lower()
+    markers = ["правк", "поправ", "исправ", "доработ", "передел", "не работает", "ошиб", "замен", "обнов"]
+    return any(marker in text for marker in markers)
+
+
+def _auto_revision_block_reason(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    messages: list[FreelancehuntThreadMessage],
+    execution_draft_client: ExecutionDraftClient | None,
+    send_delivery: Callable[[Order, str], None] | None,
+) -> str | None:
+    if order.risks:
+        return "у заказа есть риск-флаги"
+    if execution_draft_client is None:
+        return "нет AI-клиента для подготовки правок"
+    if send_delivery is None:
+        return "нет подключенного канала отправки правок"
+    if _auto_revision_count_today(store) >= config.auto_revision_daily_limit:
+        return "дневной лимит автоправок исчерпан"
+    combined_text = "\n".join(message.text for message in messages if message.text).lower()
+    for term in _dangerous_terms():
+        if term in combined_text:
+            return f"опасный маркер: {term}"
+    return None
+
+
+def _auto_revision_count_today(store: OrderStore) -> int:
+    today_prefix = format_moscow_time().split(" ", 1)[0]
+    count = 0
+    for path in store.orders_dir.glob("*/revisions/*/delivery_message.sent.json"):
+        try:
+            if today_prefix in path.read_text(encoding="utf-8"):
+                count += 1
+        except OSError:
+            continue
+    return count
+
+
+def _write_revision_package(
+    *,
+    store: OrderStore,
+    order: Order,
+    thread: FreelancehuntThread,
+    package: ExecutionDraftPackage,
+    text: str,
+):
+    revisions_dir = store.order_dir(order.order_id) / "revisions"
+    revision_dir = revisions_dir / f"revision-{len(list(revisions_dir.glob('revision-*'))) + 1:03d}"
+    files_dir = revision_dir / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
+    (revision_dir / "request.md").write_text(text.strip() + "\n", encoding="utf-8")
+    (revision_dir / "summary.md").write_text(package.summary_ru.strip() + "\n", encoding="utf-8")
+    (revision_dir / "delivery_message.md").write_text(package.delivery_message_ru.strip() + "\n", encoding="utf-8")
+    (revision_dir / "thread.json").write_text(
+        json.dumps(
+            {
+                "thread_id": thread.thread_id,
+                "project_id": thread.project_id,
+                "created_at": format_moscow_time(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for name, content in package.files.items():
+        safe_name = name.replace("/", "_").replace("\\", "_").strip() or "result.txt"
+        (files_dir / safe_name).write_text(content, encoding="utf-8")
+    return revision_dir
+
+
+def _write_revision_sent_record(*, revision_dir, text: str, response_payload) -> None:
+    (revision_dir / "delivery_message.sent.json").write_text(
+        json.dumps(
+            {
+                "sent_at": format_moscow_time(),
+                "message": text,
+                "response": response_payload,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_revision_manual_review_required(
+    *,
+    store: OrderStore,
+    order: Order,
+    thread: FreelancehuntThread,
+    reason: str,
+    text: str,
+) -> None:
+    path = store.order_dir(order.order_id) / "revisions" / "manual_review_required.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "created_at": format_moscow_time(),
+                "thread_id": thread.thread_id,
+                "project_id": thread.project_id,
+                "reason": reason,
+                "request": text,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _auto_reply_block_reason(
     *,
     config: Config,
@@ -369,7 +675,14 @@ def _auto_reply_block_reason(
     if _auto_reply_count_today(store) >= config.auto_reply_daily_limit:
         return "дневной лимит автоответов исчерпан"
     combined_text = "\n".join([reply_text, *[message.text for message in messages if message.text]]).lower()
-    blocked_terms = [
+    for term in _dangerous_terms():
+        if term in combined_text:
+            return f"опасный маркер: {term}"
+    return None
+
+
+def _dangerous_terms() -> list[str]:
+    return [
         "логин и пароль",
         "логин/пароль",
         "пароль от",
@@ -385,10 +698,6 @@ def _auto_reply_block_reason(
         "вне безопасной сделки",
         "без безопасной сделки",
     ]
-    for term in blocked_terms:
-        if term in combined_text:
-            return f"опасный маркер: {term}"
-    return None
 
 
 def _auto_reply_count_today(store: OrderStore) -> int:
@@ -413,6 +722,8 @@ def _maybe_prepare_execution_workspace(
     send_delivery: Callable[[Order, str], None] | None,
 ) -> None:
     if not config.auto_execution_enabled:
+        return
+    if order.status not in {OrderStatus.OUTREACH_SENT, OrderStatus.DISCOVERY, OrderStatus.DRAFT_READY}:
         return
     execution_dir = store.order_dir(order.order_id) / "execution"
     existed = (execution_dir / "checklist.md").exists()
