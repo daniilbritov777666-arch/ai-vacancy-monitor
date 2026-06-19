@@ -46,6 +46,10 @@
     <string>true</string>
     <key>AUTO_EXECUTION_DRAFT_ENABLED</key>
     <string>true</string>
+    <key>AUTO_DELIVERY_ENABLED</key>
+    <string>true</string>
+    <key>AUTO_DELIVERY_DAILY_LIMIT</key>
+    <string>5</string>
     <key>OPENAI_MODEL</key>
     <string>gpt-4.1-mini</string>
     <key>OPENAI_BASE_URL</key>

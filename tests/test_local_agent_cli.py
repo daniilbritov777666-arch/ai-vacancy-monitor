@@ -582,6 +582,95 @@ def test_run_local_agent_requests_delivery_approval_after_execution_draft(tmp_pa
     )
 
 
+def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient()
+    execution_client = FakeExecutionDraftClient()
+    config = replace(
+        make_config(tmp_path),
+        auto_conversation_enabled=True,
+        auto_reply_enabled=True,
+        auto_execution_enabled=True,
+        auto_execution_draft_enabled=True,
+        auto_delivery_enabled=True,
+        freelancehunt_api_token="fh-token",
+        openai_api_key="sk-test",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.OUTREACH_SENT)
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    updated = store.load_order(order.order_id)
+    assert updated.status == OrderStatus.PAYMENT_REQUESTED
+    assert ("thread-1", "Здравствуйте! Подготовил рабочий вариант для проверки.") in conversation_client.thread_messages
+    assert (store.order_dir(order.order_id) / "outbox" / "delivery_message.sent.json").exists()
+    assert not (store.order_dir(order.order_id) / "outbox" / "delivery_approval_requested.json").exists()
+    assert any("Результат автоматически отправлен заказчику" in message for message, _ in sent)
+
+
+def test_run_local_agent_blocks_auto_delivery_when_order_has_risks(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient()
+    execution_client = FakeExecutionDraftClient()
+    config = replace(
+        make_config(tmp_path),
+        auto_conversation_enabled=True,
+        auto_execution_enabled=True,
+        auto_execution_draft_enabled=True,
+        auto_delivery_enabled=True,
+        freelancehunt_api_token="fh-token",
+        openai_api_key="sk-test",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты", risks=["нужно проверить ТЗ"]),
+        status=OrderStatus.OUTREACH_SENT,
+    )
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    updated = store.load_order(order.order_id)
+    assert updated.status == OrderStatus.AWAITING_DELIVERY_APPROVAL
+    assert conversation_client.thread_messages == []
+    assert (store.order_dir(order.order_id) / "outbox" / "delivery_approval_requested.json").exists()
+    assert any("Автосдача результата заблокирована" in message for message, _ in sent)
+
+
 def test_handle_order_callback_sends_delivery_when_allowed(tmp_path):
     answers = []
     delivered = []

@@ -94,11 +94,6 @@ def run_local_agent_once(
         if config.freelancehunt_api_token
         else None
     )
-    delivery_sender = send_delivery or (
-        (lambda order, text: _send_marketplace_delivery(config, order, text))
-        if config.freelancehunt_api_token
-        else None
-    )
 
     def on_match(post: Post, result: MatchResult) -> None:
         order = handle_matched_post(
@@ -146,6 +141,7 @@ def run_local_agent_once(
         freelancehunt_client=freelancehunt_client,
         conversation_reply_client=conversation_reply_client,
         execution_draft_client=execution_draft_client,
+        send_delivery=send_delivery,
     )
     return summary
 
@@ -204,6 +200,7 @@ def _sync_freelancehunt_conversations(
     freelancehunt_client: FreelancehuntConversationClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
     execution_draft_client: ExecutionDraftClient | None = None,
+    send_delivery: Callable[[Order, str], None] | None = None,
 ) -> None:
     if not config.auto_conversation_enabled or not config.freelancehunt_api_token:
         return
@@ -256,12 +253,17 @@ def _sync_freelancehunt_conversations(
             marketplace_client=client,
             config=config,
         )
+
+        def send_thread_delivery(order: Order, text: str, *, thread_id: str = thread.thread_id) -> None:
+            client.add_thread_message(thread_id=thread_id, message_html=text)
+
         _maybe_prepare_execution_workspace(
             config=config,
             store=store,
             order=updated_order,
             sender=sender,
             execution_draft_client=draft_client,
+            send_delivery=send_delivery or send_thread_delivery,
         )
 
 
@@ -408,6 +410,7 @@ def _maybe_prepare_execution_workspace(
     order: Order,
     sender: Callable[..., None],
     execution_draft_client: ExecutionDraftClient | None,
+    send_delivery: Callable[[Order, str], None] | None,
 ) -> None:
     if not config.auto_execution_enabled:
         return
@@ -430,6 +433,7 @@ def _maybe_prepare_execution_workspace(
         order=order,
         sender=sender,
         execution_draft_client=execution_draft_client,
+        send_delivery=send_delivery,
     )
 
 
@@ -440,13 +444,14 @@ def _maybe_generate_execution_draft(
     order: Order,
     sender: Callable[..., None],
     execution_draft_client: ExecutionDraftClient | None,
+    send_delivery: Callable[[Order, str], None] | None,
 ) -> None:
     if not config.auto_execution_draft_enabled or execution_draft_client is None:
         return
     order_dir = store.order_dir(order.order_id)
     generated_dir = order_dir / "execution" / "generated"
     if generated_dir.exists() and any(generated_dir.iterdir()):
-        _maybe_request_delivery_approval(store=store, order=order, sender=sender)
+        _maybe_finalize_delivery(store=store, order=order, sender=sender, config=config, send_delivery=send_delivery)
         return
     try:
         conversation_text = _read_optional_text(order_dir / "conversation.md")
@@ -465,7 +470,124 @@ def _maybe_generate_execution_draft(
             "Результат лежит в execution/generated/, сообщение заказчику - в outbox/delivery_message.md."
         ),
     )
-    _maybe_request_delivery_approval(store=store, order=order, sender=sender)
+    _maybe_finalize_delivery(store=store, order=order, sender=sender, config=config, send_delivery=send_delivery)
+
+
+def _maybe_finalize_delivery(
+    *,
+    store: OrderStore,
+    order: Order,
+    sender: Callable[..., None],
+    config: Config,
+    send_delivery: Callable[[Order, str], None] | None,
+) -> None:
+    if _delivery_sent_path(store, order).exists():
+        return
+    if not config.auto_delivery_enabled:
+        _maybe_request_delivery_approval(store=store, order=order, sender=sender)
+        return
+
+    block_reason = _auto_delivery_block_reason(
+        config=config,
+        store=store,
+        order=order,
+        send_delivery=send_delivery,
+    )
+    if block_reason:
+        _safe_notify(
+            sender,
+            (
+                "Автосдача результата заблокирована.\n\n"
+                f"ID: {order.order_id}\n"
+                f"Причина: {block_reason}\n\n"
+                "Результат оставлен на ручное подтверждение."
+            ),
+        )
+        _maybe_request_delivery_approval(store=store, order=order, sender=sender)
+        return
+
+    delivery_text = _read_delivery_text(store, order)
+    try:
+        send_delivery(order, delivery_text)
+    except Exception as exc:
+        _safe_notify(sender, f"Результат по заказу {order.order_id} не отправлен автоматически: {type(exc).__name__}.")
+        _maybe_request_delivery_approval(store=store, order=order, sender=sender)
+        return
+
+    updated = store.update_status(order.order_id, OrderStatus.PAYMENT_REQUESTED)
+    _write_delivery_sent_record(store=store, order=updated, text=delivery_text)
+    _safe_notify(
+        sender,
+        (
+            "Результат автоматически отправлен заказчику на Freelancehunt.\n\n"
+            f"ID: {updated.order_id}\n"
+            "Статус: ожидаем оплату / подтверждение безопасной сделки."
+        ),
+    )
+
+
+def _auto_delivery_block_reason(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    send_delivery: Callable[[Order, str], None] | None,
+) -> str | None:
+    order_dir = store.order_dir(order.order_id)
+    delivery_message_path = order_dir / "outbox" / "delivery_message.md"
+    generated_dir = order_dir / "execution" / "generated"
+    allowed_statuses = {
+        OrderStatus.OUTREACH_SENT,
+        OrderStatus.DISCOVERY,
+        OrderStatus.DRAFT_READY,
+        OrderStatus.AWAITING_DELIVERY_APPROVAL,
+    }
+    if order.risks:
+        return "у заказа есть риск-флаги"
+    if order.status not in allowed_statuses:
+        return f"статус {order.status.value} не разрешен для автосдачи"
+    if send_delivery is None:
+        return "нет подключенного канала отправки результата"
+    if _auto_delivery_count_today(store) >= config.auto_delivery_daily_limit:
+        return "дневной лимит автосдачи исчерпан"
+    if not delivery_message_path.exists():
+        return "нет outbox/delivery_message.md"
+    if not generated_dir.exists() or not any(path.is_file() for path in generated_dir.glob("*")):
+        return "нет файлов результата в execution/generated/"
+
+    delivery_text = _read_delivery_text(store, order).lower()
+    blocked_terms = [
+        "логин и пароль",
+        "логин/пароль",
+        "пароль от",
+        "seed",
+        "private key",
+        "приватный ключ",
+        "обойти лимит",
+        "обход лимитов",
+        "накрут",
+        "фишинг",
+        "вредонос",
+        "мимо безопасной сделки",
+        "вне безопасной сделки",
+        "без безопасной сделки",
+    ]
+    for term in blocked_terms:
+        if term in delivery_text:
+            return f"опасный маркер: {term}"
+    return None
+
+
+def _auto_delivery_count_today(store: OrderStore) -> int:
+    today_prefix = format_moscow_time().split(" ", 1)[0]
+    count = 0
+    for path in store.orders_dir.glob("*/outbox/delivery_message.sent.json"):
+        try:
+            if today_prefix in path.read_text(encoding="utf-8"):
+                count += 1
+        except OSError:
+            continue
+    return count
 
 
 def _maybe_request_delivery_approval(
@@ -782,7 +904,7 @@ def _read_delivery_text(store: OrderStore, order: Order) -> str:
 
 
 def _write_delivery_sent_record(*, store: OrderStore, order: Order, text: str) -> None:
-    path = store.order_dir(order.order_id) / "outbox" / "delivery_message.sent.json"
+    path = _delivery_sent_path(store, order)
     path.write_text(
         json.dumps(
             {
@@ -795,6 +917,10 @@ def _write_delivery_sent_record(*, store: OrderStore, order: Order, text: str) -
         + "\n",
         encoding="utf-8",
     )
+
+
+def _delivery_sent_path(store: OrderStore, order: Order):
+    return store.order_dir(order.order_id) / "outbox" / "delivery_message.sent.json"
 
 
 def _read_outreach_text(store: OrderStore, order: Order) -> str:

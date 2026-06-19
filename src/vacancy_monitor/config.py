@@ -37,6 +37,8 @@ class Config:
     auto_reply_daily_limit: int = 10
     auto_execution_enabled: bool = False
     auto_execution_draft_enabled: bool = False
+    auto_delivery_enabled: bool = False
+    auto_delivery_daily_limit: int = 5
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -55,13 +57,16 @@ class Config:
         freelancehunt_api_token = os.environ.get("FREELANCEHUNT_API_TOKEN", "").strip() or None
         freelancehunt_bid_safe_type = os.environ.get("FREELANCEHUNT_BID_SAFE_TYPE", "employer").strip()
         freelancehunt_bid_days = int(os.environ.get("FREELANCEHUNT_BID_DAYS", "2"))
-        auto_outreach_enabled = os.environ.get("AUTO_OUTREACH_ENABLED", "").lower() in {"1", "true", "yes"}
+        autonomous_default = auto_mode == "autopilot"
+        auto_outreach_enabled = _env_bool("AUTO_OUTREACH_ENABLED", default=autonomous_default)
         auto_outreach_daily_limit = int(os.environ.get("AUTO_OUTREACH_DAILY_LIMIT", "3"))
-        auto_conversation_enabled = os.environ.get("AUTO_CONVERSATION_ENABLED", "").lower() in {"1", "true", "yes"}
-        auto_reply_enabled = os.environ.get("AUTO_REPLY_ENABLED", "").lower() in {"1", "true", "yes"}
+        auto_conversation_enabled = _env_bool("AUTO_CONVERSATION_ENABLED", default=autonomous_default)
+        auto_reply_enabled = _env_bool("AUTO_REPLY_ENABLED", default=autonomous_default)
         auto_reply_daily_limit = int(os.environ.get("AUTO_REPLY_DAILY_LIMIT", "10"))
-        auto_execution_enabled = os.environ.get("AUTO_EXECUTION_ENABLED", "").lower() in {"1", "true", "yes"}
-        auto_execution_draft_enabled = os.environ.get("AUTO_EXECUTION_DRAFT_ENABLED", "").lower() in {"1", "true", "yes"}
+        auto_execution_enabled = _env_bool("AUTO_EXECUTION_ENABLED", default=autonomous_default)
+        auto_execution_draft_enabled = _env_bool("AUTO_EXECUTION_DRAFT_ENABLED", default=autonomous_default)
+        auto_delivery_enabled = _env_bool("AUTO_DELIVERY_ENABLED", default=autonomous_default)
+        auto_delivery_daily_limit = int(os.environ.get("AUTO_DELIVERY_DAILY_LIMIT", "5"))
 
         if not bot_token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
@@ -95,6 +100,8 @@ class Config:
             auto_reply_daily_limit=auto_reply_daily_limit,
             auto_execution_enabled=auto_execution_enabled,
             auto_execution_draft_enabled=auto_execution_draft_enabled,
+            auto_delivery_enabled=auto_delivery_enabled,
+            auto_delivery_daily_limit=auto_delivery_daily_limit,
         )
 
 
@@ -102,3 +109,10 @@ def _csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip().lstrip("@") for item in value.split(",") if item.strip()]
+
+
+def _env_bool(name: str, *, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes"}

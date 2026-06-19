@@ -45,6 +45,33 @@ def test_autopilot_config_reads_env(monkeypatch):
     assert config.openai_api_key == "sk-test"
 
 
+def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("AUTO_MODE", "autopilot")
+
+    config = Config.from_env()
+
+    assert config.auto_outreach_enabled is True
+    assert config.auto_conversation_enabled is True
+    assert config.auto_reply_enabled is True
+    assert config.auto_execution_enabled is True
+    assert config.auto_execution_draft_enabled is True
+    assert config.auto_delivery_enabled is True
+
+
+def test_autopilot_mode_allows_explicit_autonomous_flag_override(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("AUTO_MODE", "autopilot")
+    monkeypatch.setenv("AUTO_DELIVERY_ENABLED", "false")
+
+    config = Config.from_env()
+
+    assert config.auto_outreach_enabled is True
+    assert config.auto_delivery_enabled is False
+
+
 def test_freelancehunt_config_reads_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
@@ -88,6 +115,8 @@ def test_auto_reply_and_execution_config_reads_env(monkeypatch):
     monkeypatch.setenv("AUTO_REPLY_DAILY_LIMIT", "7")
     monkeypatch.setenv("AUTO_EXECUTION_ENABLED", "true")
     monkeypatch.setenv("AUTO_EXECUTION_DRAFT_ENABLED", "true")
+    monkeypatch.setenv("AUTO_DELIVERY_ENABLED", "true")
+    monkeypatch.setenv("AUTO_DELIVERY_DAILY_LIMIT", "2")
 
     config = Config.from_env()
 
@@ -95,3 +124,5 @@ def test_auto_reply_and_execution_config_reads_env(monkeypatch):
     assert config.auto_reply_daily_limit == 7
     assert config.auto_execution_enabled is True
     assert config.auto_execution_draft_enabled is True
+    assert config.auto_delivery_enabled is True
+    assert config.auto_delivery_daily_limit == 2
