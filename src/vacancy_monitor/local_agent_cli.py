@@ -30,6 +30,13 @@ from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.order_models import Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.sources import fetch_channel_posts, fetch_rss_posts as fetch_rss_feed_posts
+from vacancy_monitor.status_report import (
+    audit_freelancehunt_api,
+    build_status_report_text,
+    mark_status_report_sent,
+    should_send_status_report,
+    write_status_report_snapshot,
+)
 from vacancy_monitor.telegram import answer_callback_query, get_updates, send_telegram_message
 from vacancy_monitor.telegram_control import CallbackAction, build_order_keyboard, parse_callback_data, resolve_transition
 
@@ -153,6 +160,12 @@ def run_local_agent_once(
         sender=sender,
         freelancehunt_client=freelancehunt_client,
     )
+    _maybe_send_status_report(
+        config=config,
+        store=store,
+        sender=sender,
+        freelancehunt_client=freelancehunt_client,
+    )
     return summary
 
 
@@ -216,7 +229,7 @@ def _sync_freelancehunt_workspaces(
     try:
         workspaces = client.list_project_workspaces()
     except Exception as exc:
-        _safe_notify(sender, f"Проверка статусов сделок Freelancehunt не выполнена: {type(exc).__name__}.")
+        _write_workspace_watch_error(store=store, exc=exc)
         return
 
     for workspace in workspaces:
@@ -269,6 +282,25 @@ def _write_workspace_status(*, store: OrderStore, order: Order, workspace: Freel
     )
 
 
+def _write_workspace_watch_error(*, store: OrderStore, exc: Exception) -> None:
+    path = store.orders_dir / "reports" / "freelancehunt_workspace_watch_error.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    response = getattr(exc, "response", None)
+    path.write_text(
+        json.dumps(
+            {
+                "checked_at": format_moscow_time(),
+                "error": type(exc).__name__,
+                "status_code": getattr(response, "status_code", None),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _workspace_is_paid_or_closed(workspace: FreelancehuntWorkspace) -> bool:
     text = (workspace.status or "").lower()
     markers = [
@@ -286,6 +318,27 @@ def _workspace_is_paid_or_closed(workspace: FreelancehuntWorkspace) -> bool:
         "принят",
     ]
     return any(marker in text for marker in markers)
+
+
+def _maybe_send_status_report(
+    *,
+    config: Config,
+    store: OrderStore,
+    sender: Callable[..., None],
+    freelancehunt_client: FreelancehuntConversationClient | None = None,
+) -> None:
+    if not config.auto_status_report_enabled:
+        return
+    if not should_send_status_report(store=store, interval_minutes=config.auto_status_report_interval_minutes):
+        return
+    client = freelancehunt_client
+    if client is None and config.freelancehunt_api_token:
+        client = FreelancehuntClient(api_token=config.freelancehunt_api_token)
+    audit = audit_freelancehunt_api(store=store, client=client)
+    text = build_status_report_text(store=store, audit=audit)
+    write_status_report_snapshot(store=store, audit=audit, text=text)
+    _safe_notify(sender, text)
+    mark_status_report_sent(store=store)
 
 
 def _sync_freelancehunt_conversations(

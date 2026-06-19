@@ -42,6 +42,8 @@ class Config:
     auto_payment_watch_enabled: bool = False
     auto_revision_enabled: bool = False
     auto_revision_daily_limit: int = 5
+    auto_status_report_enabled: bool = False
+    auto_status_report_interval_minutes: int = 360
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -73,6 +75,8 @@ class Config:
         auto_payment_watch_enabled = _env_bool("AUTO_PAYMENT_WATCH_ENABLED", default=autonomous_default)
         auto_revision_enabled = _env_bool("AUTO_REVISION_ENABLED", default=autonomous_default)
         auto_revision_daily_limit = int(os.environ.get("AUTO_REVISION_DAILY_LIMIT", "5"))
+        auto_status_report_enabled = _env_bool("AUTO_STATUS_REPORT_ENABLED", default=autonomous_default)
+        auto_status_report_interval_minutes = int(os.environ.get("AUTO_STATUS_REPORT_INTERVAL_MINUTES", "360"))
 
         if not bot_token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
@@ -111,6 +115,8 @@ class Config:
             auto_payment_watch_enabled=auto_payment_watch_enabled,
             auto_revision_enabled=auto_revision_enabled,
             auto_revision_daily_limit=auto_revision_daily_limit,
+            auto_status_report_enabled=auto_status_report_enabled,
+            auto_status_report_interval_minutes=auto_status_report_interval_minutes,
         )
 
 

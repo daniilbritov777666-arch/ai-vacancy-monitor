@@ -119,6 +119,8 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AUTO_PAYMENT_WATCH_ENABLED` - проверяет workspace-статусы Freelancehunt и закрывает локальный заказ после оплаты/приемки. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REVISION_ENABLED` - разрешает агенту самому обрабатывать безопасные правки после сдачи результата. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REVISION_DAILY_LIMIT` - дневной лимит автоматических правок. По умолчанию `5`.
+- `AUTO_STATUS_REPORT_ENABLED` - отправляет Telegram-отчет состояния агента с live-аудитом API Freelancehunt. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
+- `AUTO_STATUS_REPORT_INTERVAL_MINUTES` - минимальный интервал между Telegram-отчетами. По умолчанию `360`.
 - `FREELANCEHUNT_API_TOKEN` - API-токен Freelancehunt для отправки отклика через `POST /v2/projects/{project_id}/bids`.
 - `FREELANCEHUNT_BID_SAFE_TYPE` - тип безопасной сделки Freelancehunt: `employer`, `developer`, `split` или `employer_cashless`. По умолчанию `employer`.
 - `FREELANCEHUNT_BID_DAYS` - срок выполнения в днях для первого отклика. По умолчанию `2`.
@@ -144,6 +146,8 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `payment/freelancehunt_workspace.json` - последний считанный статус workspace/сделки Freelancehunt.
 - `revisions/<revision_id>/` - пакет автоматической правки: запрос, файлы, сообщение сдачи и отметка отправки.
 - `revisions/manual_review_required.json` - заблокированный запрос правок, который не был выполнен автоматически.
+- `reports/freelancehunt_live_api_audit.json` - последний live-аудит `threads`/`workspaces` Freelancehunt.
+- `reports/status_report.md` - последний Telegram-отчет состояния агента.
 
 Проверка готовности бирж, переписки и платежей:
 

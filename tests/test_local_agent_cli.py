@@ -824,6 +824,82 @@ def test_run_local_agent_blocks_unsafe_revision_request(tmp_path):
     assert any("Автоправка заблокирована" in message for message, _ in sent)
 
 
+def test_run_local_agent_sends_status_report_with_live_api_audit(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient(
+        unread=False,
+        workspaces=[
+            FreelancehuntWorkspace(
+                workspace_id="workspace-1",
+                project_id="123456",
+                status="in_progress",
+                raw={"id": "workspace-1", "attributes": {"status": "in_progress"}},
+            )
+        ],
+    )
+    config = replace(
+        make_config(tmp_path),
+        auto_status_report_enabled=True,
+        auto_status_report_interval_minutes=0,
+        freelancehunt_api_token="fh-token",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.PAYMENT_REQUESTED)
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+    )
+
+    reports = [message for message, _ in sent if "Статус агента" in message]
+    assert reports
+    assert "Треды: 1" in reports[-1]
+    assert "Workspace: 1" in reports[-1]
+    assert "Связано с заказами: 2" in reports[-1]
+    assert "payment_requested: 1" in reports[-1]
+    assert (config.orders_path / "reports" / "freelancehunt_live_api_audit.json").exists()
+    assert (config.orders_path / "reports" / "status_report_state.json").exists()
+
+
+def test_run_local_agent_skips_status_report_until_interval_passes(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient(unread=False)
+    config = replace(
+        make_config(tmp_path),
+        auto_status_report_enabled=True,
+        auto_status_report_interval_minutes=360,
+        freelancehunt_api_token="fh-token",
+        channels=[],
+        rss_feeds=[],
+    )
+    state_dir = config.orders_path / "reports"
+    state_dir.mkdir(parents=True)
+    (state_dir / "status_report_state.json").write_text('{"sent_at_iso": "2999-01-01T00:00:00+03:00"}\n', encoding="utf-8")
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+    )
+
+    assert not any("Статус агента" in message for message, _ in sent)
+
+
 def test_handle_order_callback_sends_delivery_when_allowed(tmp_path):
     answers = []
     delivered = []

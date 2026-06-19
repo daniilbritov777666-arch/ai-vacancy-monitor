@@ -44,6 +44,8 @@
 - `AUTO_PAYMENT_WATCH_ENABLED=true` - агент проверяет workspace-статусы Freelancehunt и закрывает локальный заказ после оплаты/приемки.
 - `AUTO_REVISION_ENABLED=true` - агент сам обрабатывает безопасные правки после сдачи результата.
 - `AUTO_REVISION_DAILY_LIMIT=5` - дневной лимит автоматических правок.
+- `AUTO_STATUS_REPORT_ENABLED=true` - агент отправляет Telegram-отчет состояния с live-аудитом API Freelancehunt.
+- `AUTO_STATUS_REPORT_INTERVAL_MINUTES=360` - минимальный интервал между отчетами.
 - Если автосдача заблокирована safety-фильтром, агент присылает карточку проверки в Telegram. Кнопка `Разрешить отправку` остается ручным fallback.
 
 AI-слой пишет:
@@ -67,8 +69,10 @@ AI-слой пишет:
 - `orders/<order_id>/payment/freelancehunt_workspace.json`.
 - `orders/<order_id>/revisions/<revision_id>/`.
 - `orders/<order_id>/revisions/manual_review_required.json`.
+- `orders/reports/freelancehunt_live_api_audit.json`.
+- `orders/reports/status_report.md`.
 
-Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher оплаты - через `AUTO_PAYMENT_WATCH_ENABLED=true`. Действия с текстом блокируются safety-фильтром при риск-флагах, паролях, обходах лимитов, накрутках и оплате вне безопасной сделки. Закрытие заказа выполняется только по статусу workspace/сделки из API Freelancehunt.
+Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher оплаты - через `AUTO_PAYMENT_WATCH_ENABLED=true`, Telegram-отчет - через `AUTO_STATUS_REPORT_ENABLED=true`. Действия с текстом блокируются safety-фильтром при риск-флагах, паролях, обходах лимитов, накрутках и оплате вне безопасной сделки. Закрытие заказа выполняется только по статусу workspace/сделки из API Freelancehunt.
 
 ## Быстрый запуск на новом Mac
 
