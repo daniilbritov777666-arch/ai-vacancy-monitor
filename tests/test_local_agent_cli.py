@@ -536,6 +536,126 @@ def test_run_local_agent_generates_execution_draft_after_customer_reply(tmp_path
     assert any("AI-пакет результата подготовлен" in message for message, _ in sent)
 
 
+def test_run_local_agent_requests_delivery_approval_after_execution_draft(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient()
+    execution_client = FakeExecutionDraftClient()
+    config = replace(
+        make_config(tmp_path),
+        auto_conversation_enabled=True,
+        auto_execution_enabled=True,
+        auto_execution_draft_enabled=True,
+        freelancehunt_api_token="fh-token",
+        openai_api_key="sk-test",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.OUTREACH_SENT)
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    updated = store.load_order(order.order_id)
+    assert updated.status == OrderStatus.AWAITING_DELIVERY_APPROVAL
+    assert (store.order_dir(order.order_id) / "outbox" / "delivery_approval_requested.json").exists()
+    approval_messages = [(message, markup) for message, markup in sent if "Результат готов к проверке" in message]
+    assert approval_messages
+    assert any(
+        button["text"] == "Разрешить отправку"
+        for row in approval_messages[-1][1]["inline_keyboard"]
+        for button in row
+    )
+
+
+def test_handle_order_callback_sends_delivery_when_allowed(tmp_path):
+    answers = []
+    delivered = []
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты", risks=[]),
+        status=OrderStatus.AWAITING_DELIVERY_APPROVAL,
+    )
+    store.save_order(order)
+    outbox = store.order_dir(order.order_id) / "outbox"
+    outbox.mkdir(parents=True)
+    (outbox / "delivery_message.md").write_text("Здравствуйте! Результат готов к проверке.\n", encoding="utf-8")
+
+    updated = handle_order_callback(
+        callback_data=f"o:as:{order.order_id}",
+        store=store,
+        answer=answers.append,
+        send_delivery=lambda order, text: delivered.append((order.order_id, text)),
+    )
+
+    assert updated is not None
+    assert updated.status == OrderStatus.PAYMENT_REQUESTED
+    assert delivered == [(order.order_id, "Здравствуйте! Результат готов к проверке.")]
+    assert answers == ["Результат отправлен заказчику."]
+
+
+def test_poll_telegram_once_routes_delivery_callback(tmp_path):
+    answers = []
+    delivered = []
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты", risks=[]),
+        status=OrderStatus.AWAITING_DELIVERY_APPROVAL,
+    )
+    store.save_order(order)
+    outbox = store.order_dir(order.order_id) / "outbox"
+    outbox.mkdir(parents=True)
+    (outbox / "delivery_message.md").write_text("Результат готов.\n", encoding="utf-8")
+
+    next_offset = poll_telegram_once(
+        updates=[
+            {
+                "update_id": 100,
+                "callback_query": {
+                    "id": "callback-1",
+                    "data": f"o:as:{order.order_id}",
+                },
+            }
+        ],
+        store=store,
+        answer_callback=lambda callback_id, text: answers.append((callback_id, text)),
+        send_delivery=lambda order, text: delivered.append((order.order_id, text)),
+    )
+
+    assert next_offset == 101
+    assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
+    assert delivered == [(order.order_id, "Результат готов.")]
+    assert answers == [("callback-1", "Результат отправлен заказчику.")]
+
+
 def test_run_local_agent_does_not_auto_send_without_price(tmp_path):
     auto_sent = []
     result = replace(safe_autopilot_result(), price_rub=0)

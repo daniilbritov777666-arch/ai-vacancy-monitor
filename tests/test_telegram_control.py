@@ -76,3 +76,13 @@ def test_approve_terms_rejects_stale_status():
     )
 
     assert next_status is None
+
+
+def test_allow_sending_moves_delivery_approval_to_payment_requested():
+    next_status = resolve_transition(
+        action=CallbackAction.ALLOW_SENDING,
+        current_status=OrderStatus.AWAITING_DELIVERY_APPROVAL,
+        can_auto_send=True,
+    )
+
+    assert next_status == OrderStatus.PAYMENT_REQUESTED

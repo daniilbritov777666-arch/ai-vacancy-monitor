@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import replace
 from collections.abc import Callable
@@ -29,7 +30,7 @@ from vacancy_monitor.order_models import Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.sources import fetch_channel_posts, fetch_rss_posts as fetch_rss_feed_posts
 from vacancy_monitor.telegram import answer_callback_query, get_updates, send_telegram_message
-from vacancy_monitor.telegram_control import parse_callback_data, resolve_transition
+from vacancy_monitor.telegram_control import CallbackAction, build_order_keyboard, parse_callback_data, resolve_transition
 
 
 class AutopilotClient(Protocol):
@@ -74,6 +75,7 @@ def run_local_agent_once(
     send_message: Callable[..., None] | None = None,
     autopilot_client: AutopilotClient | None = None,
     send_outreach: Callable[[Order, str], None] | None = None,
+    send_delivery: Callable[[Order, str], None] | None = None,
     freelancehunt_client: FreelancehuntConversationClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
     execution_draft_client: ExecutionDraftClient | None = None,
@@ -89,6 +91,11 @@ def run_local_agent_once(
     )
     outreach_sender = send_outreach or (
         (lambda order, text: _send_marketplace_outreach(config, order, text))
+        if config.freelancehunt_api_token
+        else None
+    )
+    delivery_sender = send_delivery or (
+        (lambda order, text: _send_marketplace_delivery(config, order, text))
         if config.freelancehunt_api_token
         else None
     )
@@ -439,6 +446,7 @@ def _maybe_generate_execution_draft(
     order_dir = store.order_dir(order.order_id)
     generated_dir = order_dir / "execution" / "generated"
     if generated_dir.exists() and any(generated_dir.iterdir()):
+        _maybe_request_delivery_approval(store=store, order=order, sender=sender)
         return
     try:
         conversation_text = _read_optional_text(order_dir / "conversation.md")
@@ -456,6 +464,46 @@ def _maybe_generate_execution_draft(
             f"Файлов: {len(written)}\n"
             "Результат лежит в execution/generated/, сообщение заказчику - в outbox/delivery_message.md."
         ),
+    )
+    _maybe_request_delivery_approval(store=store, order=order, sender=sender)
+
+
+def _maybe_request_delivery_approval(
+    *,
+    store: OrderStore,
+    order: Order,
+    sender: Callable[..., None],
+) -> None:
+    order_dir = store.order_dir(order.order_id)
+    marker_path = order_dir / "outbox" / "delivery_approval_requested.json"
+    delivery_message_path = order_dir / "outbox" / "delivery_message.md"
+    generated_dir = order_dir / "execution" / "generated"
+    if marker_path.exists() or not delivery_message_path.exists() or not generated_dir.exists():
+        return
+    generated_files = sorted(path.relative_to(order_dir) for path in generated_dir.glob("*") if path.is_file())
+    updated = replace(order, status=OrderStatus.AWAITING_DELIVERY_APPROVAL, updated_at=format_moscow_time())
+    store.save_order(updated)
+    marker_path.write_text(
+        json.dumps(
+            {
+                "requested_at": format_moscow_time(),
+                "generated_files": [str(path) for path in generated_files],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _safe_notify(
+        sender,
+        (
+            "Результат готов к проверке.\n\n"
+            f"ID: {updated.order_id}\n"
+            f"Файлов: {len(generated_files)}\n"
+            "Проверь execution/generated/ и outbox/delivery_message.md, затем нажми «Разрешить отправку»."
+        ),
+        reply_markup=build_order_keyboard(updated),
     )
 
 
@@ -577,9 +625,9 @@ def _auto_outreach_count_today(store: OrderStore) -> int:
     )
 
 
-def _safe_notify(sender: Callable[..., None], text: str) -> None:
+def _safe_notify(sender: Callable[..., None], text: str, **kwargs) -> None:
     try:
-        sender(text)
+        sender(text, **kwargs)
     except Exception as exc:
         print(f"Telegram notification failed: {type(exc).__name__}")
 
@@ -617,6 +665,7 @@ def handle_order_callback(
     store: OrderStore,
     answer: Callable[[str], None],
     send_outreach: Callable[[Order, str], None] | None = None,
+    send_delivery: Callable[[Order, str], None] | None = None,
 ) -> Order | None:
     try:
         parsed = parse_callback_data(callback_data)
@@ -634,6 +683,14 @@ def handle_order_callback(
             store=store,
             answer=answer,
             send_outreach=send_outreach,
+        )
+
+    if parsed.action == CallbackAction.ALLOW_SENDING and order.status == OrderStatus.AWAITING_DELIVERY_APPROVAL:
+        return _approve_delivery(
+            order=order,
+            store=store,
+            answer=answer,
+            send_delivery=send_delivery,
         )
 
     next_status = resolve_transition(
@@ -692,6 +749,54 @@ def _approve_outreach(
     return updated
 
 
+def _approve_delivery(
+    *,
+    order: Order,
+    store: OrderStore,
+    answer: Callable[[str], None],
+    send_delivery: Callable[[Order, str], None] | None,
+) -> Order:
+    delivery_text = _read_delivery_text(store, order)
+    if send_delivery is None:
+        updated = store.update_status(order.order_id, OrderStatus.PAYMENT_REQUESTED)
+        answer("Готово. Отправь результат вручную.")
+        return updated
+    try:
+        send_delivery(order, delivery_text)
+    except Exception as exc:
+        answer(f"Результат не отправлен: {type(exc).__name__}.")
+        return order
+    updated = store.update_status(order.order_id, OrderStatus.PAYMENT_REQUESTED)
+    _write_delivery_sent_record(store=store, order=updated, text=delivery_text)
+    answer("Результат отправлен заказчику.")
+    return updated
+
+
+def _read_delivery_text(store: OrderStore, order: Order) -> str:
+    path = store.order_dir(order.order_id) / "outbox" / "delivery_message.md"
+    if path.exists():
+        text = path.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    return "Здравствуйте! Подготовил результат, прошу проверить."
+
+
+def _write_delivery_sent_record(*, store: OrderStore, order: Order, text: str) -> None:
+    path = store.order_dir(order.order_id) / "outbox" / "delivery_message.sent.json"
+    path.write_text(
+        json.dumps(
+            {
+                "sent_at": format_moscow_time(),
+                "message": text,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _read_outreach_text(store: OrderStore, order: Order) -> str:
     path = store.order_dir(order.order_id) / "autopilot" / "outreach.md"
     if path.exists():
@@ -707,6 +812,7 @@ def poll_telegram_once(
     store: OrderStore,
     answer_callback: Callable[[str, str], None],
     send_outreach: Callable[[Order, str], None] | None = None,
+    send_delivery: Callable[[Order, str], None] | None = None,
 ) -> int | None:
     next_offset: int | None = None
     for update in updates:
@@ -725,6 +831,7 @@ def poll_telegram_once(
             store=store,
             answer=lambda text, callback_id=callback_id: answer_callback(callback_id, text),
             send_outreach=send_outreach,
+            send_delivery=send_delivery,
         )
     return next_offset
 
@@ -738,6 +845,7 @@ def poll_telegram_safely(
     get_updates_func: Callable[..., list[dict]] = get_updates,
     answer_callback: Callable[[str, str], None],
     send_outreach: Callable[[Order, str], None] | None = None,
+    send_delivery: Callable[[Order, str], None] | None = None,
 ) -> int | None:
     try:
         updates = get_updates_func(bot_token, offset=offset, timeout_seconds=timeout_seconds)
@@ -749,6 +857,7 @@ def poll_telegram_safely(
         store=store,
         answer_callback=answer_callback,
         send_outreach=send_outreach,
+        send_delivery=send_delivery,
     )
 
 
@@ -765,8 +874,13 @@ def run_local_agent_loop(
         if config.freelancehunt_api_token
         else None
     )
+    send_delivery = (
+        (lambda order, text: _send_marketplace_delivery(config, order, text))
+        if config.freelancehunt_api_token
+        else None
+    )
     while True:
-        run_local_agent_once(config, send_outreach=send_outreach)
+        run_local_agent_once(config, send_outreach=send_outreach, send_delivery=send_delivery)
         next_offset = poll_telegram_safely(
             bot_token=config.bot_token,
             offset=offset,
@@ -774,6 +888,7 @@ def run_local_agent_loop(
             store=store,
             answer_callback=lambda callback_id, text: answer_callback_query(config.bot_token, callback_id, text),
             send_outreach=send_outreach,
+            send_delivery=send_delivery,
         )
         if next_offset is not None:
             offset = next_offset
@@ -798,6 +913,22 @@ def _send_marketplace_outreach(config: Config, order: Order, text: str) -> None:
             safe_type=config.freelancehunt_bid_safe_type,
         ),
     )
+
+
+def _send_marketplace_delivery(config: Config, order: Order, text: str) -> None:
+    if not order.contact:
+        raise RuntimeError("order has no contact")
+    if order.contact.channel != "freelancehunt":
+        raise RuntimeError(f"unsupported contact channel: {order.contact.channel}")
+    if not config.freelancehunt_api_token:
+        raise RuntimeError("FREELANCEHUNT_API_TOKEN is required")
+
+    client = FreelancehuntClient(api_token=config.freelancehunt_api_token)
+    for thread in client.list_threads():
+        if thread.project_id == order.contact.value:
+            client.add_thread_message(thread_id=thread.thread_id, message_html=text)
+            return
+    raise RuntimeError("matching Freelancehunt thread not found")
 
 
 def main() -> int:
