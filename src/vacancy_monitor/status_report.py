@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Protocol
 
 from vacancy_monitor.conversation import find_order_for_thread
-from vacancy_monitor.freelancehunt import FreelancehuntThread, FreelancehuntWorkspace
+from vacancy_monitor.freelancehunt import FreelancehuntMyBid, FreelancehuntThread
 from vacancy_monitor.order_models import MOSCOW_TZ, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
 
@@ -16,7 +16,7 @@ class FreelancehuntAuditClient(Protocol):
     def list_threads(self) -> list[FreelancehuntThread]:
         ...
 
-    def list_project_workspaces(self) -> list[FreelancehuntWorkspace]:
+    def list_my_bids(self) -> list[FreelancehuntMyBid]:
         ...
 
 
@@ -26,9 +26,10 @@ class FreelancehuntApiAudit:
     threads_total: int = 0
     unread_threads: int = 0
     linked_threads: int = 0
-    workspaces_total: int = 0
-    linked_workspaces: int = 0
-    workspace_statuses: dict[str, int] | None = None
+    bids_total: int = 0
+    winning_bids: int = 0
+    linked_bids: int = 0
+    bid_statuses: dict[str, int] | None = None
     errors: list[str] | None = None
 
 
@@ -47,7 +48,7 @@ def should_send_status_report(*, store: OrderStore, interval_minutes: int) -> bo
 def audit_freelancehunt_api(*, store: OrderStore, client: FreelancehuntAuditClient | None) -> FreelancehuntApiAudit:
     errors: list[str] = []
     threads: list[FreelancehuntThread] = []
-    workspaces: list[FreelancehuntWorkspace] = []
+    bids: list[FreelancehuntMyBid] = []
     if client is None:
         errors.append("Freelancehunt client is not configured")
     else:
@@ -56,19 +57,20 @@ def audit_freelancehunt_api(*, store: OrderStore, client: FreelancehuntAuditClie
         except Exception as exc:
             errors.append(f"threads: {_format_api_error(exc)}")
         try:
-            workspaces = client.list_project_workspaces()
+            bids = client.list_my_bids()
         except Exception as exc:
-            errors.append(f"workspaces: {_format_api_error(exc)}")
+            errors.append(f"bids: {_format_api_error(exc)}")
 
-    workspace_statuses = Counter((workspace.status or "unknown").lower() for workspace in workspaces)
+    bid_statuses = Counter((bid.status or "unknown").lower() for bid in bids)
     return FreelancehuntApiAudit(
         checked_at=format_moscow_time(),
         threads_total=len(threads),
         unread_threads=sum(1 for thread in threads if thread.is_unread),
         linked_threads=sum(1 for thread in threads if find_order_for_thread(store, thread) is not None),
-        workspaces_total=len(workspaces),
-        linked_workspaces=sum(1 for workspace in workspaces if _find_order_for_project_id(store, workspace.project_id)),
-        workspace_statuses=dict(sorted(workspace_statuses.items())),
+        bids_total=len(bids),
+        winning_bids=sum(1 for bid in bids if bid.is_winner),
+        linked_bids=sum(1 for bid in bids if _find_order_for_project_id(store, bid.project_id)),
+        bid_statuses=dict(sorted(bid_statuses.items())),
         errors=errors,
     )
 
@@ -76,11 +78,11 @@ def audit_freelancehunt_api(*, store: OrderStore, client: FreelancehuntAuditClie
 def build_status_report_text(*, store: OrderStore, audit: FreelancehuntApiAudit) -> str:
     status_counts = Counter(order.status.value for order in store.list_orders())
     status_lines = "\n".join(f"- {status}: {count}" for status, count in sorted(status_counts.items())) or "- заказов нет"
-    workspace_lines = (
-        ", ".join(f"{status}: {count}" for status, count in (audit.workspace_statuses or {}).items()) or "нет"
+    bid_lines = (
+        ", ".join(f"{status}: {count}" for status, count in (audit.bid_statuses or {}).items()) or "нет"
     )
     error_lines = "\n".join(f"- {error}" for error in (audit.errors or [])) or "- нет"
-    linked_total = audit.linked_threads + audit.linked_workspaces
+    linked_total = audit.linked_threads + audit.linked_bids
     return (
         "Статус агента\n\n"
         f"Время: {audit.checked_at}\n\n"
@@ -88,9 +90,9 @@ def build_status_report_text(*, store: OrderStore, audit: FreelancehuntApiAudit)
         f"{status_lines}\n\n"
         "API Freelancehunt:\n"
         f"- Треды: {audit.threads_total}, непрочитанные: {audit.unread_threads}\n"
-        f"- Workspace: {audit.workspaces_total}\n"
+        f"- Ставки: {audit.bids_total}, победившие: {audit.winning_bids}\n"
         f"- Связано с заказами: {linked_total}\n"
-        f"- Статусы workspace: {workspace_lines}\n\n"
+        f"- Статусы ставок: {bid_lines}\n\n"
         "Ошибки API:\n"
         f"{error_lines}"
     )

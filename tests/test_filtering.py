@@ -164,6 +164,18 @@ def test_rejects_call_listening_and_table_filling():
     assert "не IT-заказ" in result.risks
 
 
+def test_rejects_manual_copy_paste_and_data_entry():
+    post = make_post(
+        "Простая работа по копированию и вставке данных. Задачи ввода данных в Excel. "
+        "Бюджет 700 UAH."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
+
+
 def test_rejects_legal_claim_work():
     post = make_post("Подать в суд на туркомпанию, работа за процент от полученного без предоплаты.")
 
@@ -257,6 +269,49 @@ def test_accepts_one_off_content_task_with_fixed_deliverable():
 
     assert result.accepted is True
     assert "тексты/контент" in result.reasons
+
+
+def test_rejects_non_content_projects_that_only_mention_text_or_documents():
+    posts = [
+        make_post(
+            "Нужен верстальщик под Amazon KDP и PDF. Книга содержит 60 страниц текста. "
+            "Бюджет 150 EUR."
+        ),
+        make_post(
+            "Найти в Польше фирму, которая сделает сертификацию оборудования. "
+            "Все требования описаны в документе. Бюджет 2500 UAH."
+        ),
+        make_post(
+            "Создать 3D визуализацию тестового оборудования. Все детали в документе. "
+            "Бюджет 3000 UAH."
+        ),
+    ]
+
+    results = [evaluate_post(post) for post in posts]
+
+    assert all(result.accepted is False for result in results)
+    assert all("тексты/контент" not in result.reasons for result in results)
+
+
+def test_rejects_physical_funnel_as_crm_signal():
+    post = make_post(
+        "Найти фирму для сертификации установки: монета вращается по поверхности воронки. "
+        "Бюджет 2500 UAH."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "crm/no-code" not in result.reasons
+
+
+def test_rejects_ukrainian_word_robota_as_crm_robot_signal():
+    post = make_post("Разова робота: перенести коробки на склад. Оплата 1000 UAH.")
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "crm/no-code" not in result.reasons
 
 
 def test_formats_actionable_telegram_message():

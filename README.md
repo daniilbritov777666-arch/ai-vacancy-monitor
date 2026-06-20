@@ -1,16 +1,16 @@
 # Telegram Freelance Agent
 
-Локальный полуавтономный агент для поиска разовых IT-фриланс заказов в РФ-формате и подготовки чернового выполнения с помощью Codex/ChatGPT/OpenAI.
+Локальный автономный агент для поиска и выполнения разовых IT-фриланс заказов в РФ-формате с помощью OpenAI-compatible API.
 
 ## Как работает
 
 - GitHub Actions запускает проверку каждые 5 минут.
 - Скрипт читает публичные страницы `https://t.me/s/<channel>`.
 - Скрипт также читает публичные RSS-ленты фриланс-заказов FL.ru и Freelancehunt.
-- Подходящие заказы отправляются в Telegram с кнопками подтверждения.
+- В ручном режиме подходящие заказы отправляются в Telegram с кнопками подтверждения; в `autopilot` безопасные заказы проходят без кнопок.
 - Локальный агент создает отдельную папку заказа в `orders/`.
 - AI-слой может подготовить анализ, отклик, план, черновик результата и сообщение заказчику.
-- Если заказ пришел с Freelancehunt и задан `FREELANCEHUNT_API_TOKEN`, кнопка `Одобрить отклик` отправляет первый отклик через официальный API Freelancehunt.
+- Если заказ пришел с Freelancehunt и задан `FREELANCEHUNT_API_TOKEN`, автопилот отправляет первый безопасный отклик через официальный API Freelancehunt.
 - Если включен `AUTO_CONVERSATION_ENABLED`, локальный агент читает входящие треды Freelancehunt, сохраняет переписку в папку заказа, готовит AI-черновик ответа и уведомляет Telegram.
 - Если включен `AUTO_REPLY_ENABLED`, безопасные последующие ответы отправляются заказчику на Freelancehunt автоматически.
 - Если включен `AUTO_EXECUTION_ENABLED`, агент создает рабочий пакет выполнения и стартовые артефакты результата в папке заказа.
@@ -109,6 +109,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AUTO_MAX_PRICE_RUB` - максимальная цена, при которой `autopilot` может сам продвинуть заказ до черновика. По умолчанию `15000`.
 - `AUTO_OUTREACH_ENABLED` - разрешает агенту самому отправлять первый безопасный отклик на Freelancehunt после AI-проверки. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_OUTREACH_DAILY_LIMIT` - дневной лимит автооткликов. По умолчанию `3`.
+- `AUTO_OUTREACH_MAX_AGE_HOURS` - максимальный возраст проекта для автоотклика. По умолчанию `24` часа.
 - `AUTO_CONVERSATION_ENABLED` - разрешает читать входящие треды Freelancehunt, сохранять их в `conversation.md`/`inbox/`, готовить AI-черновик ответа в `outbox/` и уведомлять Telegram. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REPLY_ENABLED` - разрешает агенту самому отправлять безопасные последующие ответы в тред Freelancehunt. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REPLY_DAILY_LIMIT` - дневной лимит автоответов в треды. По умолчанию `10`.
@@ -116,7 +117,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AUTO_EXECUTION_DRAFT_ENABLED` - генерирует AI-пакет результата в `execution/generated/` и сообщение сдачи в `outbox/delivery_message.md`. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_DELIVERY_ENABLED` - разрешает агенту самому отправлять безопасный результат заказчику после генерации AI-пакета. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_DELIVERY_DAILY_LIMIT` - дневной лимит автосдачи результатов. По умолчанию `5`.
-- `AUTO_PAYMENT_WATCH_ENABLED` - проверяет workspace-статусы Freelancehunt и закрывает локальный заказ после оплаты/приемки. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
+- `AUTO_PAYMENT_WATCH_ENABLED` - проверяет собственные ставки через `/v2/my/bids`, распознает выбранного исполнителя и закрывает локальный заказ после финального статуса проекта. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REVISION_ENABLED` - разрешает агенту самому обрабатывать безопасные правки после сдачи результата. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REVISION_DAILY_LIMIT` - дневной лимит автоматических правок. По умолчанию `5`.
 - `AUTO_STATUS_REPORT_ENABLED` - отправляет Telegram-отчет состояния агента с live-аудитом API Freelancehunt. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
@@ -143,10 +144,10 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `outbox/delivery_message.md` - сообщение заказчику для сдачи результата.
 - `outbox/delivery_approval_requested.json` - отметка, что карточка проверки результата уже отправлена в Telegram.
 - `outbox/delivery_message.sent.json` - отметка, что результат отправлен заказчику автоматически или после кнопки `Разрешить отправку`.
-- `payment/freelancehunt_workspace.json` - последний считанный статус workspace/сделки Freelancehunt.
+- `payment/freelancehunt_bid.json` - последняя считанная собственная ставка, признак победителя и статус проекта Freelancehunt.
 - `revisions/<revision_id>/` - пакет автоматической правки: запрос, файлы, сообщение сдачи и отметка отправки.
 - `revisions/manual_review_required.json` - заблокированный запрос правок, который не был выполнен автоматически.
-- `reports/freelancehunt_live_api_audit.json` - последний live-аудит `threads`/`workspaces` Freelancehunt.
+- `reports/freelancehunt_live_api_audit.json` - последний live-аудит `threads`/`my/bids` Freelancehunt.
 - `reports/status_report.md` - последний Telegram-отчет состояния агента.
 
 Проверка готовности бирж, переписки и платежей:

@@ -187,7 +187,11 @@ def run_order_autopilot(
     order_dir = store.order_dir(order.order_id)
     _write_autopilot_files(order_dir, result)
 
-    if mode == "autopilot" and result.safe_to_autopilot and 0 < result.price_rub <= max_price_rub:
+    if (
+        mode == "autopilot"
+        and result.safe_to_autopilot
+        and 0 < result.price_rub <= max_price_rub
+    ):
         updated = replace(
             order,
             status=OrderStatus.DRAFT_READY,
@@ -199,7 +203,14 @@ def run_order_autopilot(
         store.save_order(updated)
         return updated
 
-    updated = replace(order, risks=result.risk_flags, updated_at=format_moscow_time())
+    updated = replace(
+        order,
+        status=OrderStatus.SKIPPED if mode == "autopilot" else order.status,
+        price_rub=result.price_rub or order.price_rub,
+        deadline_ru=result.deadline_ru or order.deadline_ru,
+        risks=result.risk_flags,
+        updated_at=format_moscow_time(),
+    )
     store.save_order(updated)
     return updated
 

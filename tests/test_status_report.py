@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from vacancy_monitor.freelancehunt import FreelancehuntThread, FreelancehuntWorkspace
+from vacancy_monitor.freelancehunt import FreelancehuntMyBid, FreelancehuntThread
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
@@ -20,13 +20,15 @@ class FakeAuditClient:
             )
         ]
 
-    def list_project_workspaces(self):
+    def list_my_bids(self):
         return [
-            FreelancehuntWorkspace(
-                workspace_id="workspace-1",
+            FreelancehuntMyBid(
+                bid_id="bid-1",
                 project_id="123456",
-                status="completed",
-                raw={"id": "workspace-1"},
+                status="active",
+                is_winner=True,
+                project_status="completed",
+                raw={"id": "bid-1"},
             )
         ]
 
@@ -35,8 +37,8 @@ class FailingAuditClient:
     def list_threads(self):
         raise TimeoutError("threads timeout")
 
-    def list_project_workspaces(self):
-        error = RuntimeError("workspaces failed")
+    def list_my_bids(self):
+        error = RuntimeError("bids failed")
         error.response = type("Response", (), {"status_code": 404})()
         raise error
 
@@ -58,8 +60,9 @@ def test_status_report_counts_local_orders_and_api_links(tmp_path):
     assert audit.threads_total == 1
     assert audit.unread_threads == 1
     assert audit.linked_threads == 1
-    assert audit.linked_workspaces == 1
-    assert audit.workspace_statuses == {"completed": 1}
+    assert audit.linked_bids == 1
+    assert audit.winning_bids == 1
+    assert audit.bid_statuses == {"active": 1}
     assert "closed: 1" in text
     assert "Связано с заказами: 2" in text
 
@@ -70,6 +73,9 @@ def test_status_report_records_api_errors(tmp_path):
     audit = audit_freelancehunt_api(store=store, client=FailingAuditClient())
     text = build_status_report_text(store=store, audit=audit)
 
-    assert audit.errors == ["threads: TimeoutError", "workspaces: RuntimeError 404"]
+    assert audit.errors == [
+        "threads: TimeoutError",
+        "bids: RuntimeError 404",
+    ]
     assert "threads: TimeoutError" in text
-    assert "workspaces: RuntimeError 404" in text
+    assert "bids: RuntimeError 404" in text

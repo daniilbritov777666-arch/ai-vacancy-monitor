@@ -46,15 +46,19 @@ class FakeSession:
                 },
                 status_code=200,
             )
-        if url.endswith("/my/workspaces/projects"):
+        if url.endswith("/my/bids"):
             return FakeResponse(
                 {
                     "data": [
                         {
-                            "id": "workspace-1",
-                            "attributes": {"status": "completed"},
-                            "relationships": {
-                                "project": {"data": {"id": "123456"}},
+                            "id": "bid-1",
+                            "attributes": {
+                                "status": "active",
+                                "is_winner": True,
+                                "project": {
+                                    "id": 123456,
+                                    "status": {"id": 21, "name": "completed"},
+                                },
                             },
                         }
                     ]
@@ -163,14 +167,16 @@ def test_freelancehunt_client_adds_thread_message():
     assert session.calls[0]["json"] == {"message_html": "Здравствуйте! Начать могу сегодня."}
 
 
-def test_freelancehunt_client_lists_project_workspaces():
+def test_freelancehunt_client_lists_my_bids_with_project_state():
     session = FakeSession()
     client = FreelancehuntClient(api_token="fh-token", session=session)
 
-    workspaces = client.list_project_workspaces()
+    bids = client.list_my_bids()
 
-    assert len(workspaces) == 1
-    assert workspaces[0].workspace_id == "workspace-1"
-    assert workspaces[0].project_id == "123456"
-    assert workspaces[0].status == "completed"
-    assert session.calls[0]["url"] == "https://api.freelancehunt.com/v2/my/workspaces/projects"
+    assert len(bids) == 1
+    assert bids[0].bid_id == "bid-1"
+    assert bids[0].project_id == "123456"
+    assert bids[0].status == "active"
+    assert bids[0].is_winner is True
+    assert bids[0].project_status == "completed"
+    assert session.calls[0]["url"] == "https://api.freelancehunt.com/v2/my/bids"

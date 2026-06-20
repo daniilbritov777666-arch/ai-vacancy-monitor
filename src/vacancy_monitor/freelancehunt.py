@@ -43,10 +43,12 @@ class FreelancehuntThreadMessage:
 
 
 @dataclass(frozen=True)
-class FreelancehuntWorkspace:
-    workspace_id: str
+class FreelancehuntMyBid:
+    bid_id: str
     project_id: str | None
     status: str | None
+    is_winner: bool
+    project_status: str | None
     raw: dict
 
 
@@ -112,14 +114,14 @@ class FreelancehuntClient:
         response.raise_for_status()
         return response.json()
 
-    def list_project_workspaces(self) -> list[FreelancehuntWorkspace]:
+    def list_my_bids(self) -> list[FreelancehuntMyBid]:
         response = self.session.get(
-            f"{self.base_url}/my/workspaces/projects",
+            f"{self.base_url}/my/bids",
             headers=self._headers(),
             timeout=30,
         )
         response.raise_for_status()
-        return [_workspace_from_api(item) for item in _data_list(response.json())]
+        return [_my_bid_from_api(item) for item in _data_list(response.json())]
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -166,13 +168,18 @@ def _message_from_api(item: dict) -> FreelancehuntThreadMessage:
     )
 
 
-def _workspace_from_api(item: dict) -> FreelancehuntWorkspace:
+def _my_bid_from_api(item: dict) -> FreelancehuntMyBid:
     attributes = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
-    return FreelancehuntWorkspace(
-        workspace_id=str(item.get("id") or attributes.get("id") or ""),
+    project = attributes.get("project") if isinstance(attributes.get("project"), dict) else {}
+    project_status = project.get("status")
+    if isinstance(project_status, dict):
+        project_status = project_status.get("name") or project_status.get("slug") or project_status.get("id")
+    return FreelancehuntMyBid(
+        bid_id=str(item.get("id") or attributes.get("id") or ""),
         project_id=_extract_project_id(item),
-        status=_first_str(attributes, "status", "state", "status_name", "safe_status", "payment_status")
-        or _first_str(item, "status", "state"),
+        status=_first_str(attributes, "status", "state") or _first_str(item, "status", "state"),
+        is_winner=bool(attributes.get("is_winner")),
+        project_status=str(project_status) if project_status is not None else None,
         raw=item,
     )
 

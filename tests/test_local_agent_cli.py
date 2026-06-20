@@ -4,7 +4,7 @@ from pathlib import Path
 from vacancy_monitor.autopilot import AutopilotResult
 from vacancy_monitor.config import Config
 from vacancy_monitor.execution import ExecutionDraftPackage
-from vacancy_monitor.freelancehunt import FreelancehuntThread, FreelancehuntThreadMessage, FreelancehuntWorkspace
+from vacancy_monitor.freelancehunt import FreelancehuntMyBid, FreelancehuntThread, FreelancehuntThreadMessage
 from vacancy_monitor.local_agent_cli import (
     handle_order_callback,
     poll_telegram_once,
@@ -82,11 +82,11 @@ class FailingAutopilotClient:
 
 
 class FakeFreelancehuntConversationClient:
-    def __init__(self, *, messages=None, workspaces=None, unread=True):
+    def __init__(self, *, messages=None, bids=None, unread=True):
         self.marked_read = []
         self.thread_messages = []
         self.messages = messages
-        self.workspaces = workspaces or []
+        self.bids = bids or []
         self.unread = unread
 
     def list_threads(self):
@@ -122,8 +122,15 @@ class FakeFreelancehuntConversationClient:
         self.thread_messages.append((thread_id, message_html))
         return {"data": {"id": "sent-1", "type": "message"}}
 
-    def list_project_workspaces(self):
-        return self.workspaces
+    def list_my_bids(self):
+        return self.bids
+
+
+class FailingBidFreelancehuntClient(FakeFreelancehuntConversationClient):
+    def list_my_bids(self):
+        error = RuntimeError("bids failed")
+        error.response = type("Response", (), {"status_code": 404})()
+        raise error
 
 
 def test_run_local_agent_creates_order_for_new_match(tmp_path):
@@ -310,6 +317,78 @@ def test_run_local_agent_auto_sends_safe_freelancehunt_outreach(tmp_path):
     assert order.latest_approved_outreach == "Здравствуйте! Готов выполнить Telegram-бота для заявок."
     assert auto_sent == [("123456", 12000, "Здравствуйте! Готов выполнить Telegram-бота для заявок.")]
     assert any("Автоотклик отправлен" in message for message, _ in sent)
+    assert not any("Новый заказ на подтверждение" in message for message, _ in sent)
+    assert all(reply_markup is None for _, reply_markup in sent)
+
+
+def test_run_local_agent_auto_sends_when_ai_warnings_are_non_blocking(tmp_path):
+    auto_sent = []
+    result = replace(safe_autopilot_result(), risk_flags=["уточнить формат доступа к Google Sheets"])
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_token="fh-token",
+        auto_outreach_enabled=True,
+        channels=[],
+        rss_feeds=["https://freelancehunt.com/projects.rss"],
+    )
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок и Google Sheets. Оплата 12 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [post],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=FakeAutopilotClient(result),
+        send_outreach=lambda order, text: auto_sent.append(order.order_id),
+    )
+
+    assert len(auto_sent) == 1
+
+
+def test_run_local_agent_skips_stale_draft_instead_of_sending_outreach(tmp_path):
+    auto_sent = []
+    config = replace(
+        make_config(tmp_path),
+        auto_outreach_enabled=True,
+        auto_outreach_max_age_hours=24,
+        freelancehunt_api_token="fh-token",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок. Оплата 12 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты", risks=[]),
+        status=OrderStatus.DRAFT_READY,
+        created_at="01.01.2020 00:00 МСК",
+        price_rub=12000,
+    )
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        send_outreach=lambda order, text: auto_sent.append(order.order_id),
+    )
+
+    assert auto_sent == []
+    assert store.load_order(order.order_id).status == OrderStatus.SKIPPED
 
 
 def test_run_local_agent_syncs_freelancehunt_threads_after_outreach(tmp_path):
@@ -678,16 +757,18 @@ def test_run_local_agent_blocks_auto_delivery_when_order_has_risks(tmp_path):
     assert any("Автосдача результата заблокирована" in message for message, _ in sent)
 
 
-def test_run_local_agent_closes_order_when_workspace_is_paid(tmp_path):
+def test_run_local_agent_closes_payment_requested_order_when_winning_project_is_completed(tmp_path):
     sent = []
     conversation_client = FakeFreelancehuntConversationClient(
         unread=False,
-        workspaces=[
-            FreelancehuntWorkspace(
-                workspace_id="workspace-1",
+        bids=[
+            FreelancehuntMyBid(
+                bid_id="bid-1",
                 project_id="123456",
-                status="completed",
-                raw={"id": "workspace-1", "attributes": {"status": "completed"}},
+                status="active",
+                is_winner=True,
+                project_status="completed",
+                raw={"id": "bid-1", "attributes": {"is_winner": True}},
             )
         ],
     )
@@ -718,8 +799,77 @@ def test_run_local_agent_closes_order_when_workspace_is_paid(tmp_path):
     )
 
     assert store.load_order(order.order_id).status == OrderStatus.CLOSED
-    assert (store.order_dir(order.order_id) / "payment" / "freelancehunt_workspace.json").exists()
-    assert any("Оплата или приемка подтверждена" in message for message, _ in sent)
+    assert (store.order_dir(order.order_id) / "payment" / "freelancehunt_bid.json").exists()
+    assert any("Проект завершен на Freelancehunt" in message for message, _ in sent)
+
+
+def test_run_local_agent_starts_discovery_when_bid_becomes_winner(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient(
+        unread=False,
+        bids=[
+            FreelancehuntMyBid(
+                bid_id="bid-1",
+                project_id="123456",
+                status="active",
+                is_winner=True,
+                project_status="in_progress",
+                raw={"id": "bid-1"},
+            )
+        ],
+    )
+    config = replace(
+        make_config(tmp_path),
+        auto_payment_watch_enabled=True,
+        freelancehunt_api_token="fh-token",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.OUTREACH_SENT)
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.DISCOVERY
+    assert any("Ставка выбрана заказчиком" in message for message, _ in sent)
+
+
+def test_run_local_agent_records_bid_watcher_error_details(tmp_path):
+    sent = []
+    conversation_client = FailingBidFreelancehuntClient(unread=False)
+    config = replace(
+        make_config(tmp_path),
+        auto_payment_watch_enabled=True,
+        freelancehunt_api_token="fh-token",
+        channels=[],
+        rss_feeds=[],
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+    )
+
+    payload = (config.orders_path / "reports" / "freelancehunt_bid_watch_error.json").read_text(encoding="utf-8")
+    assert '"status_code": 404' in payload
+    assert '"endpoint": "/my/bids"' in payload
 
 
 def test_run_local_agent_auto_processes_revision_request_after_delivery(tmp_path):
@@ -828,12 +978,14 @@ def test_run_local_agent_sends_status_report_with_live_api_audit(tmp_path):
     sent = []
     conversation_client = FakeFreelancehuntConversationClient(
         unread=False,
-        workspaces=[
-            FreelancehuntWorkspace(
-                workspace_id="workspace-1",
+        bids=[
+            FreelancehuntMyBid(
+                bid_id="bid-1",
                 project_id="123456",
-                status="in_progress",
-                raw={"id": "workspace-1", "attributes": {"status": "in_progress"}},
+                status="active",
+                is_winner=True,
+                project_status="in_progress",
+                raw={"id": "bid-1", "attributes": {"is_winner": True}},
             )
         ],
     )
@@ -867,7 +1019,7 @@ def test_run_local_agent_sends_status_report_with_live_api_audit(tmp_path):
     reports = [message for message, _ in sent if "Статус агента" in message]
     assert reports
     assert "Треды: 1" in reports[-1]
-    assert "Workspace: 1" in reports[-1]
+    assert "Ставки: 1, победившие: 1" in reports[-1]
     assert "Связано с заказами: 2" in reports[-1]
     assert "payment_requested: 1" in reports[-1]
     assert (config.orders_path / "reports" / "freelancehunt_live_api_audit.json").exists()
@@ -1006,13 +1158,17 @@ def test_run_local_agent_does_not_auto_send_without_price(tmp_path):
     store = OrderStore(config.orders_path)
     order_id = next(Path(config.orders_path).glob("*/state.json")).parent.name
     order = store.load_order(order_id)
-    assert order.status == OrderStatus.AWAITING_RESPONSE_APPROVAL
+    assert order.status == OrderStatus.SKIPPED
     assert auto_sent == []
 
 
 def test_run_local_agent_does_not_auto_send_when_ai_reports_risks(tmp_path):
     auto_sent = []
-    result = replace(safe_autopilot_result(), risk_flags=["нужна узкая экспертиза 1С/WMS"])
+    result = replace(
+        safe_autopilot_result(),
+        safe_to_autopilot=False,
+        risk_flags=["нужна узкая экспертиза 1С/WMS"],
+    )
     config = replace(
         make_config(tmp_path),
         auto_mode="autopilot",
@@ -1042,7 +1198,7 @@ def test_run_local_agent_does_not_auto_send_when_ai_reports_risks(tmp_path):
     store = OrderStore(config.orders_path)
     order_id = next(Path(config.orders_path).glob("*/state.json")).parent.name
     order = store.load_order(order_id)
-    assert order.status == OrderStatus.DRAFT_READY
+    assert order.status == OrderStatus.SKIPPED
     assert order.risks == ["нужна узкая экспертиза 1С/WMS"]
     assert auto_sent == []
 
@@ -1072,6 +1228,33 @@ def test_run_local_agent_processes_existing_pending_order_after_restart(tmp_path
     updated = store.load_order(order.order_id)
     assert updated.status == OrderStatus.DRAFT_READY
     assert (store.order_dir(order.order_id) / "autopilot" / "analysis.json").exists()
+
+
+def test_run_local_agent_skips_previously_analyzed_pending_order_in_autopilot(tmp_path):
+    config = replace(make_config(tmp_path), auto_mode="autopilot", openai_api_key="sk-test")
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="sample",
+        post_id="sample/1",
+        url="https://t.me/sample/1",
+        text="Нужен Telegram-бот, бюджет обсуждается.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+    store.save_order(order)
+    analysis = store.order_dir(order.order_id) / "autopilot" / "analysis.json"
+    analysis.parent.mkdir(parents=True)
+    analysis.write_text("{}\n", encoding="utf-8")
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=FakeAutopilotClient(safe_autopilot_result()),
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.SKIPPED
 
 
 def test_run_local_agent_does_not_crash_when_autopilot_error_notification_fails(tmp_path, capsys):

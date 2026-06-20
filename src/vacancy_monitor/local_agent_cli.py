@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import replace
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from time import sleep
 from typing import Protocol
 
@@ -22,12 +23,12 @@ from vacancy_monitor.execution import ExecutionDraftPackage, prepare_execution_w
 from vacancy_monitor.freelancehunt import (
     FreelancehuntBid,
     FreelancehuntClient,
+    FreelancehuntMyBid,
     FreelancehuntThread,
     FreelancehuntThreadMessage,
-    FreelancehuntWorkspace,
 )
 from vacancy_monitor.models import MatchResult, Post
-from vacancy_monitor.order_models import Order, OrderStatus, format_moscow_time
+from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.sources import fetch_channel_posts, fetch_rss_posts as fetch_rss_feed_posts
 from vacancy_monitor.status_report import (
@@ -74,7 +75,7 @@ class FreelancehuntConversationClient(Protocol):
     def add_thread_message(self, *, thread_id: str, message_html: str) -> dict:
         ...
 
-    def list_project_workspaces(self) -> list[FreelancehuntWorkspace]:
+    def list_my_bids(self) -> list[FreelancehuntMyBid]:
         ...
 
 
@@ -111,7 +112,11 @@ def run_local_agent_once(
             post=post,
             result=result,
             store=store,
-            send_approval=lambda text, reply_markup: sender(text, reply_markup=reply_markup),
+            send_approval=(
+                (lambda text, reply_markup: None)
+                if config.auto_mode == "autopilot"
+                else (lambda text, reply_markup: sender(text, reply_markup=reply_markup))
+            ),
         )
         _maybe_run_autopilot(
             config=config,
@@ -154,7 +159,7 @@ def run_local_agent_once(
         execution_draft_client=execution_draft_client,
         send_delivery=send_delivery,
     )
-    _sync_freelancehunt_workspaces(
+    _sync_freelancehunt_bids(
         config=config,
         store=store,
         sender=sender,
@@ -183,6 +188,8 @@ def _process_pending_autopilot_orders(
         if order.status != OrderStatus.AWAITING_RESPONSE_APPROVAL:
             continue
         if (store.order_dir(order.order_id) / "autopilot" / "analysis.json").exists():
+            if config.auto_mode == "autopilot":
+                store.update_status(order.order_id, OrderStatus.SKIPPED)
             continue
         _maybe_run_autopilot(
             config=config,
@@ -215,7 +222,7 @@ def _process_pending_auto_outreach_orders(
         )
 
 
-def _sync_freelancehunt_workspaces(
+def _sync_freelancehunt_bids(
     *,
     config: Config,
     store: OrderStore,
@@ -227,26 +234,37 @@ def _sync_freelancehunt_workspaces(
 
     client = freelancehunt_client or FreelancehuntClient(api_token=config.freelancehunt_api_token)
     try:
-        workspaces = client.list_project_workspaces()
+        bids = client.list_my_bids()
     except Exception as exc:
-        _write_workspace_watch_error(store=store, exc=exc)
+        _write_bid_watch_error(store=store, exc=exc)
         return
 
-    for workspace in workspaces:
-        order = _find_order_for_project_id(store, workspace.project_id)
+    for bid in bids:
+        order = _find_order_for_project_id(store, bid.project_id)
         if order is None:
             continue
-        _write_workspace_status(store=store, order=order, workspace=workspace)
-        if order.status == OrderStatus.PAYMENT_REQUESTED and _workspace_is_paid_or_closed(workspace):
+        _write_bid_status(store=store, order=order, bid=bid)
+        if bid.is_winner and order.status == OrderStatus.OUTREACH_SENT:
+            order = store.update_status(order.order_id, OrderStatus.DISCOVERY)
+            _safe_notify(
+                sender,
+                (
+                    "Ставка выбрана заказчиком на Freelancehunt.\n\n"
+                    f"ID: {order.order_id}\n"
+                    f"Проект: {bid.project_id or 'не указан'}\n\n"
+                    "Заказ автоматически переведен в работу."
+                ),
+            )
+        if order.status == OrderStatus.PAYMENT_REQUESTED and bid.is_winner and _project_is_completed(bid):
             updated = store.update_status(order.order_id, OrderStatus.CLOSED)
             _safe_notify(
                 sender,
                 (
-                    "Оплата или приемка подтверждена на Freelancehunt.\n\n"
+                    "Проект завершен на Freelancehunt.\n\n"
                     f"ID: {updated.order_id}\n"
-                    f"Workspace: {workspace.workspace_id or 'не указан'}\n"
-                    f"Статус: {workspace.status or 'не указан'}\n\n"
-                    "Заказ закрыт в локальном агенте."
+                    f"Ставка: {bid.bid_id or 'не указана'}\n"
+                    f"Статус проекта: {bid.project_status or 'не указан'}\n\n"
+                    "Заказ закрыт в локальном агенте. Проверьте поступление выплаты на балансе биржи."
                 ),
             )
 
@@ -262,17 +280,19 @@ def _find_order_for_project_id(store: OrderStore, project_id: str | None) -> Ord
     return None
 
 
-def _write_workspace_status(*, store: OrderStore, order: Order, workspace: FreelancehuntWorkspace) -> None:
-    path = store.order_dir(order.order_id) / "payment" / "freelancehunt_workspace.json"
+def _write_bid_status(*, store: OrderStore, order: Order, bid: FreelancehuntMyBid) -> None:
+    path = store.order_dir(order.order_id) / "payment" / "freelancehunt_bid.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
                 "checked_at": format_moscow_time(),
-                "workspace_id": workspace.workspace_id,
-                "project_id": workspace.project_id,
-                "status": workspace.status,
-                "raw": workspace.raw,
+                "bid_id": bid.bid_id,
+                "project_id": bid.project_id,
+                "status": bid.status,
+                "is_winner": bid.is_winner,
+                "project_status": bid.project_status,
+                "raw": bid.raw,
             },
             ensure_ascii=False,
             indent=2,
@@ -282,17 +302,20 @@ def _write_workspace_status(*, store: OrderStore, order: Order, workspace: Freel
     )
 
 
-def _write_workspace_watch_error(*, store: OrderStore, exc: Exception) -> None:
-    path = store.orders_dir / "reports" / "freelancehunt_workspace_watch_error.json"
+def _write_bid_watch_error(*, store: OrderStore, exc: Exception) -> None:
+    path = store.orders_dir / "reports" / "freelancehunt_bid_watch_error.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    payload = {
+        "checked_at": format_moscow_time(),
+        "error": type(exc).__name__,
+        "status_code": status_code,
+    }
+    payload["endpoint"] = "/my/bids"
     path.write_text(
         json.dumps(
-            {
-                "checked_at": format_moscow_time(),
-                "error": type(exc).__name__,
-                "status_code": getattr(response, "status_code", None),
-            },
+            payload,
             ensure_ascii=False,
             indent=2,
         )
@@ -301,8 +324,8 @@ def _write_workspace_watch_error(*, store: OrderStore, exc: Exception) -> None:
     )
 
 
-def _workspace_is_paid_or_closed(workspace: FreelancehuntWorkspace) -> bool:
-    text = (workspace.status or "").lower()
+def _project_is_completed(bid: FreelancehuntMyBid) -> bool:
+    text = (bid.project_status or "").lower()
     markers = [
         "completed",
         "complete",
@@ -1060,8 +1083,10 @@ def _maybe_auto_send_outreach(
 ) -> Order:
     if not config.auto_outreach_enabled or order.status != OrderStatus.DRAFT_READY:
         return order
-    if order.risks:
-        return order
+    if _order_is_stale(order, max_age_hours=config.auto_outreach_max_age_hours):
+        updated = store.update_status(order.order_id, OrderStatus.SKIPPED)
+        _safe_notify(sender, f"Автоотклик по заказу {order.order_id} пропущен: проект устарел.")
+        return updated
     if send_outreach is None or not (order.contact and order.contact.can_auto_send):
         return order
     if _auto_outreach_count_today(store) >= config.auto_outreach_daily_limit:
@@ -1111,6 +1136,16 @@ def _auto_outreach_count_today(store: OrderStore) -> int:
     )
 
 
+def _order_is_stale(order: Order, *, max_age_hours: int) -> bool:
+    if max_age_hours <= 0:
+        return False
+    try:
+        created_at = datetime.strptime(order.created_at, "%d.%m.%Y %H:%M МСК").replace(tzinfo=MOSCOW_TZ)
+    except ValueError:
+        return True
+    return datetime.now(MOSCOW_TZ) - created_at > timedelta(hours=max_age_hours)
+
+
 def _safe_notify(sender: Callable[..., None], text: str, **kwargs) -> None:
     try:
         sender(text, **kwargs)
@@ -1136,6 +1171,14 @@ def _autopilot_status_message(order: Order, mode: str) -> str:
             f"Цена: {order.price_rub or 'не указана'} руб.\n"
             f"Срок: {order.deadline_ru or 'не указан'}\n\n"
             "Файлы лежат в папке заказа: autopilot/, deliverables/, outbox/."
+        )
+    if mode == "autopilot" and order.status == OrderStatus.SKIPPED:
+        reason = ", ".join(order.risks) if order.risks else "нет безопасной цены в разрешенном лимите"
+        return (
+            "AI-агент пропустил заказ по правилам автопилота.\n\n"
+            f"ID: {order.order_id}\n"
+            f"Причина: {reason}\n\n"
+            "Ручное подтверждение не требуется."
         )
     return (
         "AI-агент подготовил черновики для проверки.\n\n"

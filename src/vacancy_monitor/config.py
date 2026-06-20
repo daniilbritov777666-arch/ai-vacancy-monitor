@@ -32,6 +32,7 @@ class Config:
     freelancehunt_bid_days: int = 2
     auto_outreach_enabled: bool = False
     auto_outreach_daily_limit: int = 3
+    auto_outreach_max_age_hours: int = 24
     auto_conversation_enabled: bool = False
     auto_reply_enabled: bool = False
     auto_reply_daily_limit: int = 10
@@ -65,6 +66,7 @@ class Config:
         autonomous_default = auto_mode == "autopilot"
         auto_outreach_enabled = _env_bool("AUTO_OUTREACH_ENABLED", default=autonomous_default)
         auto_outreach_daily_limit = int(os.environ.get("AUTO_OUTREACH_DAILY_LIMIT", "3"))
+        auto_outreach_max_age_hours = int(os.environ.get("AUTO_OUTREACH_MAX_AGE_HOURS", "24"))
         auto_conversation_enabled = _env_bool("AUTO_CONVERSATION_ENABLED", default=autonomous_default)
         auto_reply_enabled = _env_bool("AUTO_REPLY_ENABLED", default=autonomous_default)
         auto_reply_daily_limit = int(os.environ.get("AUTO_REPLY_DAILY_LIMIT", "10"))
@@ -105,6 +107,7 @@ class Config:
             freelancehunt_bid_days=freelancehunt_bid_days,
             auto_outreach_enabled=auto_outreach_enabled,
             auto_outreach_daily_limit=auto_outreach_daily_limit,
+            auto_outreach_max_age_hours=auto_outreach_max_age_hours,
             auto_conversation_enabled=auto_conversation_enabled,
             auto_reply_enabled=auto_reply_enabled,
             auto_reply_daily_limit=auto_reply_daily_limit,

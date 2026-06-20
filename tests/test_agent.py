@@ -47,3 +47,24 @@ def test_handle_matched_post_maps_known_reason_to_ru_category(tmp_path):
     )
 
     assert order.category == "Автоматизации и парсеры"
+
+
+def test_handle_matched_post_maps_text_content_category(tmp_path):
+    sent = []
+    post = Post(
+        source="sample",
+        post_id="sample/3",
+        url="https://t.me/sample/3",
+        text="Подготовить текст для страницы Telegram-бота. Бюджет 8000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    result = MatchResult(accepted=True, score=2, reasons=["тексты/контент", "есть сигнал оплаты"], risks=[])
+
+    order = handle_matched_post(
+        post=post,
+        result=result,
+        store=OrderStore(tmp_path / "orders"),
+        send_approval=lambda text, reply_markup: sent.append((text, reply_markup)),
+    )
+
+    assert order.category == "Тексты и контент"

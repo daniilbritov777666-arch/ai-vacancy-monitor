@@ -98,11 +98,13 @@ def test_auto_outreach_config_reads_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
     monkeypatch.setenv("AUTO_OUTREACH_ENABLED", "true")
     monkeypatch.setenv("AUTO_OUTREACH_DAILY_LIMIT", "4")
+    monkeypatch.setenv("AUTO_OUTREACH_MAX_AGE_HOURS", "36")
 
     config = Config.from_env()
 
     assert config.auto_outreach_enabled is True
     assert config.auto_outreach_daily_limit == 4
+    assert config.auto_outreach_max_age_hours == 36
 
 
 def test_conversation_config_reads_env(monkeypatch):

@@ -23,6 +23,7 @@ class OrderStatus(StrEnum):
     DRAFT_READY = "draft_ready"
     AWAITING_DELIVERY_APPROVAL = "awaiting_delivery_approval"
     PAYMENT_REQUESTED = "payment_requested"
+    SKIPPED = "skipped"
     CLOSED = "closed"
 
 

@@ -257,7 +257,30 @@ def test_run_order_autopilot_writes_files_and_moves_safe_order_to_draft_ready(tm
     assert (order_dir / "outbox" / "customer_message.md").exists()
 
 
-def test_run_order_autopilot_keeps_zero_price_order_waiting_for_approval(tmp_path):
+def test_run_order_autopilot_allows_safe_order_with_informational_warnings(tmp_path):
+    store = OrderStore(tmp_path / "orders")
+    order = make_order()
+    store.save_order(order)
+    create_order_workspace(store.orders_dir, order)
+    result = AutopilotResult(
+        safe_to_autopilot=True,
+        risk_flags=["уточнить формат доступа к Google Sheets"],
+        summary_ru="Нужен бот для приема заявок.",
+        outreach_ru="Здравствуйте! Готов выполнить бота.",
+        execution_plan_ru="Собрать бота и таблицу.",
+        price_rub=12000,
+        deadline_ru="2 дня",
+        deliverable_markdown="# Черновик результата",
+        customer_message_ru="Готов приступить.",
+    )
+
+    updated = run_order_autopilot(order=order, store=store, result=result, max_price_rub=15000, mode="autopilot")
+
+    assert updated.status == OrderStatus.DRAFT_READY
+    assert updated.risks == ["уточнить формат доступа к Google Sheets"]
+
+
+def test_run_order_autopilot_skips_zero_price_order_without_manual_approval(tmp_path):
     store = OrderStore(tmp_path / "orders")
     order = make_order_without_budget()
     store.save_order(order)
@@ -277,7 +300,7 @@ def test_run_order_autopilot_keeps_zero_price_order_waiting_for_approval(tmp_pat
     updated = run_order_autopilot(order=order, store=store, result=result, max_price_rub=15000, mode="autopilot")
 
     order_dir = store.order_dir(order.order_id)
-    assert updated.status == OrderStatus.AWAITING_RESPONSE_APPROVAL
+    assert updated.status == OrderStatus.SKIPPED
     assert (order_dir / "autopilot" / "execution_plan.md").read_text(encoding="utf-8")
     assert (order_dir / "deliverables" / "autopilot_result.md").exists()
 
@@ -305,7 +328,7 @@ def test_run_order_autopilot_uses_budget_fallback_when_ai_returns_zero_price(tmp
     assert updated.price_rub == 2000
 
 
-def test_run_order_autopilot_keeps_unsafe_order_waiting_for_approval(tmp_path):
+def test_run_order_autopilot_skips_unsafe_order_without_manual_approval(tmp_path):
     store = OrderStore(tmp_path / "orders")
     order = make_order()
     store.save_order(order)
@@ -324,5 +347,5 @@ def test_run_order_autopilot_keeps_unsafe_order_waiting_for_approval(tmp_path):
 
     updated = run_order_autopilot(order=order, store=store, result=result, max_price_rub=15000, mode="autopilot")
 
-    assert updated.status == OrderStatus.AWAITING_RESPONSE_APPROVAL
-    assert store.load_order(order.order_id).status == OrderStatus.AWAITING_RESPONSE_APPROVAL
+    assert updated.status == OrderStatus.SKIPPED
+    assert store.load_order(order.order_id).status == OrderStatus.SKIPPED

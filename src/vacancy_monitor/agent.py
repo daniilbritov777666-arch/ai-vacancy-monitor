@@ -36,7 +36,7 @@ def _category_from_result(result: MatchResult) -> str:
         return "Telegram-боты"
     if reasons & {"автоматизация/интеграции", "автоматизация", "таблицы"}:
         return "Автоматизации и парсеры"
-    if reasons & {"контент"}:
+    if reasons & {"тексты/контент", "контент"}:
         return "Тексты и контент"
     if reasons & {"таблицы/дашборды"}:
         return "Таблицы и дашборды"
