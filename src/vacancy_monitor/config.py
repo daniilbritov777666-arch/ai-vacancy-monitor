@@ -40,6 +40,8 @@ class Config:
     auto_execution_draft_enabled: bool = False
     auto_delivery_enabled: bool = False
     auto_delivery_daily_limit: int = 5
+    auto_quality_enabled: bool = False
+    auto_quality_max_repairs: int = 2
     auto_payment_watch_enabled: bool = False
     auto_revision_enabled: bool = False
     auto_revision_daily_limit: int = 5
@@ -74,6 +76,8 @@ class Config:
         auto_execution_draft_enabled = _env_bool("AUTO_EXECUTION_DRAFT_ENABLED", default=autonomous_default)
         auto_delivery_enabled = _env_bool("AUTO_DELIVERY_ENABLED", default=autonomous_default)
         auto_delivery_daily_limit = int(os.environ.get("AUTO_DELIVERY_DAILY_LIMIT", "5"))
+        auto_quality_enabled = _env_bool("AUTO_QUALITY_ENABLED", default=autonomous_default)
+        auto_quality_max_repairs = min(5, max(0, int(os.environ.get("AUTO_QUALITY_MAX_REPAIRS", "2"))))
         auto_payment_watch_enabled = _env_bool("AUTO_PAYMENT_WATCH_ENABLED", default=autonomous_default)
         auto_revision_enabled = _env_bool("AUTO_REVISION_ENABLED", default=autonomous_default)
         auto_revision_daily_limit = int(os.environ.get("AUTO_REVISION_DAILY_LIMIT", "5"))
@@ -115,6 +119,8 @@ class Config:
             auto_execution_draft_enabled=auto_execution_draft_enabled,
             auto_delivery_enabled=auto_delivery_enabled,
             auto_delivery_daily_limit=auto_delivery_daily_limit,
+            auto_quality_enabled=auto_quality_enabled,
+            auto_quality_max_repairs=auto_quality_max_repairs,
             auto_payment_watch_enabled=auto_payment_watch_enabled,
             auto_revision_enabled=auto_revision_enabled,
             auto_revision_daily_limit=auto_revision_daily_limit,

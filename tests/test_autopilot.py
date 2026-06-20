@@ -11,6 +11,7 @@ from vacancy_monitor.execution import ExecutionDraftPackage
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.quality import AIQualityReview
 from vacancy_monitor.workspace import create_order_workspace
 
 
@@ -110,6 +111,26 @@ def execution_payload():
         "summary_ru": "Собран рабочий пакет Telegram-бота.",
         "files": {"bot.py": "print('bot ready')\n"},
         "delivery_message_ru": "Здравствуйте! Подготовил первый вариант.",
+    }
+    return {
+        "output": [
+            {
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(data, ensure_ascii=False),
+                    }
+                ]
+            }
+        ]
+    }
+
+
+def quality_payload(*, passed=False):
+    data = {
+        "passed": passed,
+        "issues": [] if passed else ["Отсутствует инструкция запуска."],
+        "repair_instructions_ru": "Добавь README.md с командой запуска." if not passed else "",
     }
     return {
         "output": [
@@ -228,6 +249,57 @@ def test_openai_client_drafts_execution_package(monkeypatch):
     assert "первый вариант" in result.delivery_message_ru
     assert calls[0]["url"] == "https://api.example.com/v1/responses"
     assert calls[0]["json"]["text"]["format"]["name"] == "execution_draft_package"
+
+
+def test_openai_client_reviews_execution_package(monkeypatch):
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return Response(quality_payload())
+
+    monkeypatch.setattr("vacancy_monitor.autopilot.requests.post", fake_post)
+    client = OpenAIResponsesClient(api_key="sk-test", model="gpt-test", base_url="https://api.example.com/v1")
+    package = ExecutionDraftPackage(
+        summary_ru="Готов бот.",
+        files={"bot.py": "print('ready')"},
+        delivery_message_ru="Отправляю результат.",
+    )
+
+    result = client.review_execution_package(make_order(), "Заказчик: нужен бот", package)
+
+    assert result == AIQualityReview(
+        passed=False,
+        issues=("Отсутствует инструкция запуска.",),
+        repair_instructions_ru="Добавь README.md с командой запуска.",
+    )
+    assert calls[0]["json"]["text"]["format"]["name"] == "execution_quality_review"
+    assert "bot.py" in calls[0]["json"]["input"][1]["content"]
+
+
+def test_openai_client_repairs_execution_package(monkeypatch):
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return Response(execution_payload())
+
+    monkeypatch.setattr("vacancy_monitor.autopilot.requests.post", fake_post)
+    client = OpenAIResponsesClient(api_key="sk-test", model="gpt-test", base_url="https://api.example.com/v1")
+    package = ExecutionDraftPackage("Черновик", {"bot.py": "print('old')"}, "Черновик готов.")
+
+    result = client.repair_execution_package(
+        make_order(),
+        "Заказчик: нужен бот",
+        package,
+        "Добавь README.md с запуском.",
+    )
+
+    assert isinstance(result, ExecutionDraftPackage)
+    assert result.files["bot.py"] == "print('bot ready')"
+    prompt = calls[0]["json"]["input"][1]["content"]
+    assert "Добавь README.md" in prompt
+    assert "print('old')" in prompt
 
 
 def test_run_order_autopilot_writes_files_and_moves_safe_order_to_draft_ready(tmp_path):

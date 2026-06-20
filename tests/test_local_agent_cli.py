@@ -14,6 +14,7 @@ from vacancy_monitor.local_agent_cli import (
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.quality import AIQualityReview
 
 
 def make_config(tmp_path) -> Config:
@@ -74,6 +75,32 @@ class FakeExecutionDraftClient:
             files={"bot.py": "print('ready bot')\n"},
             delivery_message_ru=self.delivery_message,
         )
+
+
+class FakeQualityExecutionClient(FakeExecutionDraftClient):
+    def __init__(self, *, initial_files, repaired_files=None, ai_passed=True):
+        super().__init__()
+        self.initial_files = initial_files
+        self.repaired_files = repaired_files if repaired_files is not None else initial_files
+        self.ai_passed = ai_passed
+        self.review_calls = []
+        self.repair_calls = []
+
+    def draft_execution_package(self, order, conversation_text, execution_context):
+        self.calls.append((order.order_id, conversation_text, execution_context))
+        return ExecutionDraftPackage("Результат", self.initial_files, "Отправляю готовый результат.")
+
+    def review_execution_package(self, order, conversation_text, package):
+        self.review_calls.append(package)
+        return AIQualityReview(
+            passed=self.ai_passed,
+            issues=() if self.ai_passed else ("Пакет не соответствует ТЗ.",),
+            repair_instructions_ru="Исправь пакет по ТЗ." if not self.ai_passed else "",
+        )
+
+    def repair_execution_package(self, order, conversation_text, package, repair_instructions_ru):
+        self.repair_calls.append((package, repair_instructions_ru))
+        return ExecutionDraftPackage("Исправленный результат", self.repaired_files, "Отправляю исправленный результат.")
 
 
 class FailingAutopilotClient:
@@ -712,6 +739,111 @@ def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
     assert any("Результат автоматически отправлен заказчику" in message for message, _ in sent)
 
 
+def test_quality_gate_sends_package_that_passes_local_and_ai_checks(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient()
+    execution_client = FakeQualityExecutionClient(
+        initial_files={
+            "bot.py": "print('ready')\n",
+            "README.md": "# Запуск\n\n`python bot.py`\n",
+            ".env.example": "TELEGRAM_BOT_TOKEN=\n",
+        }
+    )
+    config, store, order = _quality_delivery_setup(tmp_path)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
+    assert len(execution_client.review_calls) == 1
+    assert execution_client.repair_calls == []
+    assert (store.order_dir(order.order_id) / "quality" / "latest.json").exists()
+    assert conversation_client.thread_messages == [("thread-1", "Отправляю готовый результат.")]
+
+
+def test_quality_gate_repairs_local_failure_then_sends(tmp_path):
+    conversation_client = FakeFreelancehuntConversationClient()
+    execution_client = FakeQualityExecutionClient(
+        initial_files={"bot.py": "print('draft')\n"},
+        repaired_files={"bot.py": "print('ready')\n", "README.md": "# Запуск\n\n`python bot.py`\n"},
+    )
+    config, store, order = _quality_delivery_setup(tmp_path)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
+    assert len(execution_client.repair_calls) == 1
+    generated = store.order_dir(order.order_id) / "execution" / "generated"
+    assert (generated / "README.md").exists()
+    assert conversation_client.thread_messages == [("thread-1", "Отправляю исправленный результат.")]
+
+
+def test_quality_gate_fails_after_two_repairs_without_manual_approval(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient()
+    execution_client = FakeQualityExecutionClient(initial_files={"bot.py": "print('still incomplete')\n"})
+    config, store, order = _quality_delivery_setup(tmp_path)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    order_dir = store.order_dir(order.order_id)
+    assert store.load_order(order.order_id).status == OrderStatus.QUALITY_FAILED
+    assert len(execution_client.repair_calls) == 2
+    assert conversation_client.thread_messages == []
+    assert not (order_dir / "outbox" / "delivery_approval_requested.json").exists()
+    assert (order_dir / "quality" / "quality_failed.json").exists()
+    assert len(list((order_dir / "quality").glob("attempt-*.json"))) == 3
+    assert any("quality_failed" in message for message, _ in sent)
+
+
+def _quality_delivery_setup(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        auto_conversation_enabled=True,
+        auto_execution_enabled=True,
+        auto_execution_draft_enabled=True,
+        auto_delivery_enabled=True,
+        auto_quality_enabled=True,
+        auto_quality_max_repairs=2,
+        freelancehunt_api_token="fh-token",
+        openai_api_key="sk-test",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-20T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.OUTREACH_SENT)
+    store.save_order(order)
+    return config, store, order
+
+
 def test_run_local_agent_blocks_auto_delivery_when_order_has_risks(tmp_path):
     sent = []
     conversation_client = FakeFreelancehuntConversationClient()
@@ -921,6 +1053,57 @@ def test_run_local_agent_auto_processes_revision_request_after_delivery(tmp_path
     assert ("thread-1", "Здравствуйте! Внес правки и отправляю обновленную версию.") in conversation_client.thread_messages
     assert list((store.order_dir(order.order_id) / "revisions").glob("*/delivery_message.sent.json"))
     assert any("Правки автоматически внесены" in message for message, _ in sent)
+
+
+def test_revision_is_not_sent_when_quality_gate_exhausts_repairs(tmp_path):
+    revision_message = FreelancehuntThreadMessage(
+        message_id="msg-revision-quality",
+        text="Нужно исправить ошибку и отправить обновленную версию.",
+        created_at="2026-06-20T10:00:00+03:00",
+        author_id="client-1",
+        author_type="employer",
+        is_own=False,
+        raw={"id": "msg-revision-quality"},
+    )
+    conversation_client = FakeFreelancehuntConversationClient(messages=[revision_message])
+    execution_client = FakeQualityExecutionClient(initial_files={"bot.py": "print('incomplete')\n"})
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        auto_conversation_enabled=True,
+        auto_revision_enabled=True,
+        auto_delivery_enabled=True,
+        auto_quality_enabled=True,
+        auto_quality_max_repairs=2,
+        freelancehunt_api_token="fh-token",
+        openai_api_key="sk-test",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-20T09:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.PAYMENT_REQUESTED)
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.QUALITY_FAILED
+    assert len(execution_client.repair_calls) == 2
+    assert conversation_client.thread_messages == []
+    assert not list((store.order_dir(order.order_id) / "revisions").glob("*/delivery_message.sent.json"))
 
 
 def test_run_local_agent_blocks_unsafe_revision_request(tmp_path):

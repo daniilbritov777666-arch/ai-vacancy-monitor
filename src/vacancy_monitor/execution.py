@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +48,34 @@ def write_execution_draft_package(
         written.append(path)
     (outbox_dir / "delivery_message.md").write_text(package.delivery_message_ru.strip() + "\n", encoding="utf-8")
     return written
+
+
+def replace_execution_draft_package(
+    *,
+    store: OrderStore,
+    order: Order,
+    package: ExecutionDraftPackage,
+) -> list[Path]:
+    generated_dir = store.order_dir(order.order_id) / "execution" / "generated"
+    if generated_dir.exists():
+        shutil.rmtree(generated_dir)
+    return write_execution_draft_package(store=store, order=order, package=package)
+
+
+def read_execution_draft_package(*, store: OrderStore, order: Order) -> ExecutionDraftPackage:
+    order_dir = store.order_dir(order.order_id)
+    generated_dir = order_dir / "execution" / "generated"
+    summary_path = generated_dir / "summary.md"
+    files = {
+        path.relative_to(generated_dir).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(generated_dir.rglob("*"))
+        if path.is_file() and path != summary_path
+    }
+    return ExecutionDraftPackage(
+        summary_ru=summary_path.read_text(encoding="utf-8").strip() if summary_path.exists() else "",
+        files=files,
+        delivery_message_ru=(order_dir / "outbox" / "delivery_message.md").read_text(encoding="utf-8").strip(),
+    )
 
 
 def _write_if_missing(path: Path, text: str) -> None:

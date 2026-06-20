@@ -58,6 +58,8 @@ def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
     assert config.auto_execution_enabled is True
     assert config.auto_execution_draft_enabled is True
     assert config.auto_delivery_enabled is True
+    assert config.auto_quality_enabled is True
+    assert config.auto_quality_max_repairs == 2
     assert config.auto_payment_watch_enabled is True
     assert config.auto_revision_enabled is True
     assert config.auto_status_report_enabled is True
@@ -126,6 +128,8 @@ def test_auto_reply_and_execution_config_reads_env(monkeypatch):
     monkeypatch.setenv("AUTO_EXECUTION_DRAFT_ENABLED", "true")
     monkeypatch.setenv("AUTO_DELIVERY_ENABLED", "true")
     monkeypatch.setenv("AUTO_DELIVERY_DAILY_LIMIT", "2")
+    monkeypatch.setenv("AUTO_QUALITY_ENABLED", "true")
+    monkeypatch.setenv("AUTO_QUALITY_MAX_REPAIRS", "4")
     monkeypatch.setenv("AUTO_PAYMENT_WATCH_ENABLED", "true")
     monkeypatch.setenv("AUTO_REVISION_ENABLED", "true")
     monkeypatch.setenv("AUTO_REVISION_DAILY_LIMIT", "3")
@@ -140,8 +144,20 @@ def test_auto_reply_and_execution_config_reads_env(monkeypatch):
     assert config.auto_execution_draft_enabled is True
     assert config.auto_delivery_enabled is True
     assert config.auto_delivery_daily_limit == 2
+    assert config.auto_quality_enabled is True
+    assert config.auto_quality_max_repairs == 4
     assert config.auto_payment_watch_enabled is True
     assert config.auto_revision_enabled is True
     assert config.auto_revision_daily_limit == 3
     assert config.auto_status_report_enabled is True
     assert config.auto_status_report_interval_minutes == 30
+
+
+def test_quality_repair_limit_is_bounded(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("AUTO_QUALITY_MAX_REPAIRS", "99")
+
+    config = Config.from_env()
+
+    assert config.auto_quality_max_repairs == 5

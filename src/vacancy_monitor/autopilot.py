@@ -12,6 +12,7 @@ from vacancy_monitor.execution import ExecutionDraftPackage
 from vacancy_monitor.freelancehunt import FreelancehuntThreadMessage
 from vacancy_monitor.order_models import Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.quality import AIQualityReview
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,89 @@ class OpenAIResponsesClient:
             if not _should_fallback_to_chat(exc):
                 raise
         return self._draft_execution_package_with_chat_completions(order, conversation_text, execution_context)
+
+    def review_execution_package(
+        self,
+        order: Order,
+        conversation_text: str,
+        package: ExecutionDraftPackage,
+    ) -> AIQualityReview:
+        prompt = _build_quality_review_input(order, conversation_text, package)
+        try:
+            response = self._post_with_retry(
+                lambda: requests.post(
+                    f"{self.base_url}/responses",
+                    headers=self._headers(),
+                    json={
+                        "model": self.model,
+                        "input": prompt,
+                        "text": {"format": _quality_json_schema_format()},
+                    },
+                    timeout=90,
+                )
+            )
+            response.raise_for_status()
+            return _parse_quality_review(_extract_output_text(response.json()))
+        except requests.HTTPError as exc:
+            if not _should_fallback_to_chat(exc):
+                raise
+        response = self._post_with_retry(
+            lambda: requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json={
+                    "model": self.model,
+                    "messages": prompt,
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.1,
+                },
+                timeout=90,
+            )
+        )
+        response.raise_for_status()
+        return _parse_quality_review(_extract_chat_content(response.json()))
+
+    def repair_execution_package(
+        self,
+        order: Order,
+        conversation_text: str,
+        package: ExecutionDraftPackage,
+        repair_instructions_ru: str,
+    ) -> ExecutionDraftPackage:
+        prompt = _build_repair_input(order, conversation_text, package, repair_instructions_ru)
+        try:
+            response = self._post_with_retry(
+                lambda: requests.post(
+                    f"{self.base_url}/responses",
+                    headers=self._headers(),
+                    json={
+                        "model": self.model,
+                        "input": prompt,
+                        "text": {"format": _execution_json_schema_format()},
+                    },
+                    timeout=90,
+                )
+            )
+            response.raise_for_status()
+            return _parse_execution_package(_extract_output_text(response.json()))
+        except requests.HTTPError as exc:
+            if not _should_fallback_to_chat(exc):
+                raise
+        response = self._post_with_retry(
+            lambda: requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json={
+                    "model": self.model,
+                    "messages": prompt,
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.2,
+                },
+                timeout=90,
+            )
+        )
+        response.raise_for_status()
+        return _parse_execution_package(_extract_chat_content(response.json()))
 
     def _headers(self) -> dict:
         return {
@@ -300,6 +384,15 @@ def _parse_execution_package(raw_text: str) -> ExecutionDraftPackage:
     )
 
 
+def _parse_quality_review(raw_text: str) -> AIQualityReview:
+    payload = json.loads(raw_text)
+    return AIQualityReview(
+        passed=bool(payload.get("passed")),
+        issues=tuple(_normalize_string_list(payload.get("issues", []))),
+        repair_instructions_ru=_normalize_text(payload.get("repair_instructions_ru", "")),
+    )
+
+
 def _normalize_text(value: object) -> str:
     if isinstance(value, list):
         lines = []
@@ -432,6 +525,71 @@ def _build_execution_chat_messages(order: Order, conversation_text: str, executi
     ]
 
 
+def _build_quality_review_input(
+    order: Order,
+    conversation_text: str,
+    package: ExecutionDraftPackage,
+) -> list[dict]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Ты строгий QA-рецензент результата разовой IT-задачи. Проверь соответствие ТЗ, "
+                "полноту, работоспособность по статическому анализу, инструкции запуска и отсутствие секретов. "
+                "Не считай обещания и описания заменой работающим файлам. Верни только структурированный JSON."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Категория: {order.category}\nИсходное ТЗ:\n{order.original_text}\n\n"
+                f"Переписка:\n{conversation_text or '[нет переписки]'}\n\n"
+                f"Пакет результата:\n{_execution_package_text(package)}\n\n"
+                "Верни passed, issues и repair_instructions_ru. passed=true только если пакет можно сдавать."
+            ),
+        },
+    ]
+
+
+def _build_repair_input(
+    order: Order,
+    conversation_text: str,
+    package: ExecutionDraftPackage,
+    repair_instructions_ru: str,
+) -> list[dict]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "Ты исправляешь deliverable-пакет разовой IT-задачи после QA. "
+                "Верни полный заменяющий пакет, без реальных секретов и без пояснений вне JSON."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Категория: {order.category}\nИсходное ТЗ:\n{order.original_text}\n\n"
+                f"Переписка:\n{conversation_text or '[нет переписки]'}\n\n"
+                f"Текущий пакет:\n{_execution_package_text(package)}\n\n"
+                f"Обязательные исправления:\n{repair_instructions_ru}\n\n"
+                "Верни JSON с ключами summary_ru, files, delivery_message_ru. files содержит весь итоговый набор файлов."
+            ),
+        },
+    ]
+
+
+def _execution_package_text(package: ExecutionDraftPackage) -> str:
+    return json.dumps(
+        {
+            "summary_ru": package.summary_ru,
+            "files": package.files,
+            "delivery_message_ru": package.delivery_message_ru,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )[:200_000]
+
+
 def _json_schema_format() -> dict:
     properties = {
         "safe_to_autopilot": {"type": "boolean"},
@@ -473,6 +631,25 @@ def _execution_json_schema_format() -> dict:
                 "delivery_message_ru": {"type": "string"},
             },
             "required": ["summary_ru", "files", "delivery_message_ru"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def _quality_json_schema_format() -> dict:
+    properties = {
+        "passed": {"type": "boolean"},
+        "issues": {"type": "array", "items": {"type": "string"}},
+        "repair_instructions_ru": {"type": "string"},
+    }
+    return {
+        "type": "json_schema",
+        "name": "execution_quality_review",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
             "additionalProperties": False,
         },
     }

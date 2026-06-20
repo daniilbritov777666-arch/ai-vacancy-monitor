@@ -41,12 +41,14 @@
 - `AUTO_EXECUTION_DRAFT_ENABLED=true` - агент генерирует AI-пакет результата в `execution/generated/` и сообщение сдачи в `outbox/delivery_message.md`.
 - `AUTO_DELIVERY_ENABLED=true` - агент сам отправляет безопасный результат заказчику после генерации AI-пакета и переводит заказ в `payment_requested`.
 - `AUTO_DELIVERY_DAILY_LIMIT=5` - дневной лимит автосдачи результатов.
+- `AUTO_QUALITY_ENABLED=true` - локальная и AI-проверка первоначального результата и автоправок до отправки.
+- `AUTO_QUALITY_MAX_REPAIRS=2` - две автоматические попытки исправить замечания; затем `quality_failed` без ручного согласования.
 - `AUTO_PAYMENT_WATCH_ENABLED=true` - агент проверяет `/v2/my/bids`, распознает победившую ставку и финальный статус проекта.
 - `AUTO_REVISION_ENABLED=true` - агент сам обрабатывает безопасные правки после сдачи результата.
 - `AUTO_REVISION_DAILY_LIMIT=5` - дневной лимит автоматических правок.
 - `AUTO_STATUS_REPORT_ENABLED=true` - агент отправляет Telegram-отчет состояния с live-аудитом API Freelancehunt.
 - `AUTO_STATUS_REPORT_INTERVAL_MINUTES=360` - минимальный интервал между отчетами.
-- Если автосдача заблокирована safety-фильтром, агент присылает карточку проверки в Telegram. Кнопка `Разрешить отправку` остается ручным fallback.
+- В `autopilot` непрошедший quality gate не создает карточку согласования: отправка блокируется, а Telegram получает информационное уведомление.
 
 AI-слой пишет:
 
@@ -66,6 +68,9 @@ AI-слой пишет:
 - `orders/<order_id>/outbox/delivery_message.md`.
 - `orders/<order_id>/outbox/delivery_approval_requested.json`.
 - `orders/<order_id>/outbox/delivery_message.sent.json`.
+- `orders/<order_id>/quality/attempt-<номер>.json`.
+- `orders/<order_id>/quality/latest.json`.
+- `orders/<order_id>/quality/quality_failed.json`.
 - `orders/<order_id>/payment/freelancehunt_bid.json`.
 - `orders/<order_id>/revisions/<revision_id>/`.
 - `orders/<order_id>/revisions/manual_review_required.json`.

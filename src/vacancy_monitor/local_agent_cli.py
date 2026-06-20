@@ -19,7 +19,13 @@ from vacancy_monitor.conversation import (
     write_thread_reply_draft,
     write_thread_reply_sent_record,
 )
-from vacancy_monitor.execution import ExecutionDraftPackage, prepare_execution_workspace, write_execution_draft_package
+from vacancy_monitor.execution import (
+    ExecutionDraftPackage,
+    prepare_execution_workspace,
+    read_execution_draft_package,
+    replace_execution_draft_package,
+    write_execution_draft_package,
+)
 from vacancy_monitor.freelancehunt import (
     FreelancehuntBid,
     FreelancehuntClient,
@@ -30,6 +36,7 @@ from vacancy_monitor.freelancehunt import (
 from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.quality import AIQualityReview, check_generated_package
 from vacancy_monitor.sources import fetch_channel_posts, fetch_rss_posts as fetch_rss_feed_posts
 from vacancy_monitor.status_report import (
     audit_freelancehunt_api,
@@ -58,6 +65,23 @@ class ExecutionDraftClient(Protocol):
         order: Order,
         conversation_text: str,
         execution_context: str,
+    ) -> ExecutionDraftPackage:
+        ...
+
+    def review_execution_package(
+        self,
+        order: Order,
+        conversation_text: str,
+        package: ExecutionDraftPackage,
+    ) -> AIQualityReview:
+        ...
+
+    def repair_execution_package(
+        self,
+        order: Order,
+        conversation_text: str,
+        package: ExecutionDraftPackage,
+        repair_instructions_ru: str,
     ) -> ExecutionDraftPackage:
         ...
 
@@ -588,9 +612,18 @@ def _maybe_process_revision_request(
             conversation_text,
             f"{execution_context}\n\n# Запрос правок\n\n{revision_text}".strip(),
         )
-        write_execution_draft_package(store=store, order=order, package=package)
+        replace_execution_draft_package(store=store, order=order, package=package)
+        if config.auto_quality_enabled and not _run_delivery_quality_gate(
+            config=config,
+            store=store,
+            order=order,
+            sender=sender,
+            quality_client=execution_draft_client,
+        ):
+            return True
+        package = read_execution_draft_package(store=store, order=order)
         revision_dir = _write_revision_package(store=store, order=order, thread=thread, package=package, text=revision_text)
-        delivery_text = _read_delivery_text(store, order)
+        delivery_text = package.delivery_message_ru
         response_payload = send_delivery(order, delivery_text)
         _write_revision_sent_record(revision_dir=revision_dir, text=delivery_text, response_payload=response_payload)
     except Exception as exc:
@@ -838,7 +871,14 @@ def _maybe_generate_execution_draft(
     order_dir = store.order_dir(order.order_id)
     generated_dir = order_dir / "execution" / "generated"
     if generated_dir.exists() and any(generated_dir.iterdir()):
-        _maybe_finalize_delivery(store=store, order=order, sender=sender, config=config, send_delivery=send_delivery)
+        _maybe_finalize_delivery(
+            store=store,
+            order=order,
+            sender=sender,
+            config=config,
+            send_delivery=send_delivery,
+            quality_client=execution_draft_client,
+        )
         return
     try:
         conversation_text = _read_optional_text(order_dir / "conversation.md")
@@ -857,7 +897,14 @@ def _maybe_generate_execution_draft(
             "Результат лежит в execution/generated/, сообщение заказчику - в outbox/delivery_message.md."
         ),
     )
-    _maybe_finalize_delivery(store=store, order=order, sender=sender, config=config, send_delivery=send_delivery)
+    _maybe_finalize_delivery(
+        store=store,
+        order=order,
+        sender=sender,
+        config=config,
+        send_delivery=send_delivery,
+        quality_client=execution_draft_client,
+    )
 
 
 def _maybe_finalize_delivery(
@@ -867,11 +914,21 @@ def _maybe_finalize_delivery(
     sender: Callable[..., None],
     config: Config,
     send_delivery: Callable[[Order, str], None] | None,
+    quality_client: ExecutionDraftClient | None,
 ) -> None:
     if _delivery_sent_path(store, order).exists():
         return
     if not config.auto_delivery_enabled:
         _maybe_request_delivery_approval(store=store, order=order, sender=sender)
+        return
+
+    if config.auto_quality_enabled and not _run_delivery_quality_gate(
+        config=config,
+        store=store,
+        order=order,
+        sender=sender,
+        quality_client=quality_client,
+    ):
         return
 
     block_reason = _auto_delivery_block_reason(
@@ -911,6 +968,106 @@ def _maybe_finalize_delivery(
             "Статус: ожидаем оплату / подтверждение безопасной сделки."
         ),
     )
+
+
+def _run_delivery_quality_gate(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    sender: Callable[..., None],
+    quality_client: ExecutionDraftClient | None,
+) -> bool:
+    quality_dir = store.order_dir(order.order_id) / "quality"
+    quality_dir.mkdir(parents=True, exist_ok=True)
+    conversation_text = _read_optional_text(store.order_dir(order.order_id) / "conversation.md")
+
+    for attempt in range(1, config.auto_quality_max_repairs + 2):
+        package = read_execution_draft_package(store=store, order=order)
+        local_report = check_generated_package(
+            store.order_dir(order.order_id) / "execution" / "generated",
+            delivery_message=package.delivery_message_ru,
+        )
+        ai_review: AIQualityReview | None = None
+        ai_error: str | None = None
+        if local_report.passed and quality_client is not None:
+            try:
+                ai_review = quality_client.review_execution_package(order, conversation_text, package)
+            except Exception as exc:
+                ai_error = type(exc).__name__
+        elif quality_client is None:
+            ai_error = "quality_client_unavailable"
+
+        passed = local_report.passed and ai_review is not None and ai_review.passed
+        report_data = {
+            "attempt": attempt,
+            "checked_at": format_moscow_time(),
+            "passed": passed,
+            "local": local_report.to_dict(),
+            "ai": (
+                {
+                    "passed": ai_review.passed,
+                    "issues": list(ai_review.issues),
+                    "repair_instructions_ru": ai_review.repair_instructions_ru,
+                }
+                if ai_review is not None
+                else {"passed": False, "issues": [ai_error or "AI-проверка не выполнена"], "repair_instructions_ru": ""}
+            ),
+        }
+        _write_quality_json(quality_dir / f"attempt-{attempt:03d}.json", report_data)
+        _write_quality_json(quality_dir / "latest.json", report_data)
+        if passed:
+            return True
+
+        if attempt > config.auto_quality_max_repairs:
+            failed = store.update_status(order.order_id, OrderStatus.QUALITY_FAILED)
+            _write_quality_json(
+                quality_dir / "quality_failed.json",
+                {
+                    "failed_at": format_moscow_time(),
+                    "attempts": attempt,
+                    "last_report": report_data,
+                },
+            )
+            _safe_notify(
+                sender,
+                (
+                    "Автопроверка качества завершилась без успешного результата.\n\n"
+                    f"ID: {failed.order_id}\n"
+                    "Статус: quality_failed\n"
+                    f"Попыток исправления: {config.auto_quality_max_repairs}\n"
+                    "Файлы заказчику не отправлены."
+                ),
+            )
+            return False
+
+        instructions = [issue.message for issue in local_report.issues]
+        if ai_review is not None:
+            instructions.extend(ai_review.issues)
+            if ai_review.repair_instructions_ru:
+                instructions.append(ai_review.repair_instructions_ru)
+        if ai_error:
+            instructions.append(f"Повтори AI-проверку после исправления; предыдущая ошибка: {ai_error}.")
+        try:
+            if quality_client is None:
+                raise RuntimeError("quality client unavailable")
+            repaired = quality_client.repair_execution_package(
+                order,
+                conversation_text,
+                package,
+                "\n".join(dict.fromkeys(instructions)),
+            )
+            replace_execution_draft_package(store=store, order=order, package=repaired)
+        except Exception as exc:
+            report_data["repair_error"] = type(exc).__name__
+            _write_quality_json(quality_dir / f"attempt-{attempt:03d}.json", report_data)
+            _write_quality_json(quality_dir / "latest.json", report_data)
+
+    return False
+
+
+def _write_quality_json(path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _auto_delivery_block_reason(
