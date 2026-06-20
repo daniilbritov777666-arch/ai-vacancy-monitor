@@ -68,3 +68,48 @@ def test_sends_new_matching_rss_posts(tmp_path):
 
     assert summary.sent == 1
     assert "rss/1" in sent[0]
+
+
+def test_sends_new_matching_public_project(tmp_path):
+    matched = []
+    state_path = tmp_path / "seen_posts.json"
+    SeenState({"existing"}).save(state_path)
+
+    summary = run_monitor(
+        channels=[],
+        public_project_sources=["freelance_ru"],
+        state_path=state_path,
+        fetch_posts=lambda channel: [],
+        fetch_public_posts=lambda source: [suitable_post("freelance_ru/2")],
+        send_message=lambda text: None,
+        send_first_run=False,
+        on_match=lambda post, result: matched.append(post.post_id),
+    )
+
+    assert summary.sent == 1
+    assert matched == ["freelance_ru/2"]
+
+
+def test_public_source_failure_does_not_block_other_sources(tmp_path):
+    matched = []
+    state_path = tmp_path / "seen_posts.json"
+    SeenState({"existing"}).save(state_path)
+
+    def fetch_public(source):
+        if source == "pchel":
+            raise RuntimeError("offline")
+        return [suitable_post("freelance_ru/3")]
+
+    summary = run_monitor(
+        channels=[],
+        public_project_sources=["pchel", "freelance_ru"],
+        state_path=state_path,
+        fetch_posts=lambda channel: [],
+        fetch_public_posts=fetch_public,
+        send_message=lambda text: None,
+        send_first_run=False,
+        on_match=lambda post, result: matched.append(post.post_id),
+    )
+
+    assert summary.errors == 1
+    assert matched == ["freelance_ru/3"]

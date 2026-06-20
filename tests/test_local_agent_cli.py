@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.quality import AIQualityReview
+from vacancy_monitor.public_sources import PublicSourceHealth
 
 
 def make_config(tmp_path) -> Config:
@@ -27,6 +29,65 @@ def make_config(tmp_path) -> Config:
         send_first_run=True,
         orders_path=tmp_path / "orders",
     )
+
+
+def test_run_local_agent_writes_public_source_health_report(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        public_project_sources=["freelance_ru", "pchel"],
+        public_source_probes=["kwork", "workzilla"],
+        send_first_run=False,
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        fetch_public_posts=lambda source: [],
+        probe_public=lambda source: PublicSourceHealth(
+            source=source,
+            url=f"https://example.com/{source}",
+            checked_at="2026-06-20T18:00:00+03:00",
+            status="available",
+        ),
+        send_message=lambda text, reply_markup=None: None,
+    )
+
+    report = json.loads(
+        (config.orders_path / "reports" / "public_sources_health.json").read_text(encoding="utf-8")
+    )
+    assert [item["source"] for item in report["sources"]] == [
+        "freelance_ru",
+        "pchel",
+        "kwork",
+        "workzilla",
+    ]
+
+
+def test_auto_outreach_marks_order_without_contact_unavailable(tmp_path):
+    config = replace(make_config(tmp_path), auto_outreach_enabled=True, channels=[], rss_feeds=[])
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelance.ru",
+        post_id="freelance_ru:1",
+        url="https://freelance.ru/task/view/1",
+        text="Нужен Telegram-бот. Бюджет 15 000 руб.",
+        published_at="2026-06-20T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты"),
+        status=OrderStatus.DRAFT_READY,
+    )
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.CONTACT_UNAVAILABLE
 
 
 def safe_autopilot_result() -> AutopilotResult:

@@ -26,6 +26,7 @@ from vacancy_monitor.execution import (
     replace_execution_draft_package,
     write_execution_draft_package,
 )
+from vacancy_monitor.email_outreach import SMTPOutreachClient
 from vacancy_monitor.freelancehunt import (
     FreelancehuntBid,
     FreelancehuntClient,
@@ -36,6 +37,13 @@ from vacancy_monitor.freelancehunt import (
 from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.public_sources import (
+    PUBLIC_SOURCE_URLS,
+    PublicSourceHealth,
+    fetch_public_project_posts,
+    probe_public_source,
+    write_public_source_health_report,
+)
 from vacancy_monitor.quality import AIQualityReview, check_generated_package
 from vacancy_monitor.sources import fetch_channel_posts, fetch_rss_posts as fetch_rss_feed_posts
 from vacancy_monitor.status_report import (
@@ -108,6 +116,8 @@ def run_local_agent_once(
     *,
     fetch_posts: Callable[[str], list[Post]] = fetch_channel_posts,
     fetch_rss_posts: Callable[[str], list[Post]] | None = fetch_rss_feed_posts,
+    fetch_public_posts: Callable[[str], list[Post]] | None = fetch_public_project_posts,
+    probe_public: Callable[[str], PublicSourceHealth] = probe_public_source,
     send_message: Callable[..., None] | None = None,
     autopilot_client: AutopilotClient | None = None,
     send_outreach: Callable[[Order, str], None] | None = None,
@@ -117,6 +127,47 @@ def run_local_agent_once(
     execution_draft_client: ExecutionDraftClient | None = None,
 ) -> MonitorSummary:
     store = OrderStore(config.orders_path)
+    public_health: list[PublicSourceHealth] = []
+    public_posts: dict[str, list[Post]] = {}
+    public_errors: dict[str, Exception] = {}
+
+    if fetch_public_posts is not None:
+        for source in config.public_project_sources:
+            try:
+                posts = fetch_public_posts(source)
+                public_posts[source] = posts
+                public_health.append(
+                    PublicSourceHealth(
+                        source=source,
+                        url=PUBLIC_SOURCE_URLS.get(source, ""),
+                        checked_at=datetime.now(tz=MOSCOW_TZ).isoformat(),
+                        status="available",
+                        posts=len(posts),
+                    )
+                )
+            except Exception as exc:
+                public_errors[source] = exc
+                public_health.append(
+                    PublicSourceHealth(
+                        source=source,
+                        url=PUBLIC_SOURCE_URLS.get(source, ""),
+                        checked_at=datetime.now(tz=MOSCOW_TZ).isoformat(),
+                        status="error",
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+                )
+    for source in config.public_source_probes:
+        public_health.append(probe_public(source))
+    if config.public_project_sources or config.public_source_probes:
+        write_public_source_health_report(
+            config.orders_path / "reports" / "public_sources_health.json",
+            public_health,
+        )
+
+    def tracked_public_fetch(source: str) -> list[Post]:
+        if source in public_errors:
+            raise public_errors[source]
+        return public_posts.get(source, [])
     sender = send_message or (
         lambda text, reply_markup=None: send_telegram_message(
             config.bot_token,
@@ -127,7 +178,7 @@ def run_local_agent_once(
     )
     outreach_sender = send_outreach or (
         (lambda order, text: _send_marketplace_outreach(config, order, text))
-        if config.freelancehunt_api_token
+        if config.freelancehunt_api_token or (config.smtp_host and config.smtp_from)
         else None
     )
 
@@ -154,9 +205,11 @@ def run_local_agent_once(
     summary = run_monitor(
         channels=config.channels,
         rss_feeds=config.rss_feeds,
+        public_project_sources=config.public_project_sources,
         state_path=config.state_path,
         fetch_posts=fetch_posts,
         fetch_rss_posts=fetch_rss_posts,
+        fetch_public_posts=tracked_public_fetch,
         send_message=lambda text: sender(text),
         send_first_run=config.send_first_run,
         on_match=on_match,
@@ -1244,7 +1297,15 @@ def _maybe_auto_send_outreach(
         updated = store.update_status(order.order_id, OrderStatus.SKIPPED)
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} пропущен: проект устарел.")
         return updated
-    if send_outreach is None or not (order.contact and order.contact.can_auto_send):
+    if not order.contact or not order.contact.can_auto_send:
+        updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
+        _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: контакт не опубликован.")
+        return updated
+    if send_outreach is None:
+        if order.contact.channel == "email":
+            updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
+            _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: SMTP не настроен.")
+            return updated
         return order
     if _auto_outreach_count_today(store) >= config.auto_outreach_daily_limit:
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} пропущен: дневной лимит исчерпан.")
@@ -1274,7 +1335,7 @@ def _maybe_auto_send_outreach(
     _safe_notify(
         sender,
         (
-            "Автоотклик отправлен на Freelancehunt.\n\n"
+            f"Автоотклик отправлен через {updated.contact.channel}.\n\n"
             f"ID: {updated.order_id}\n"
             f"Проект: {updated.source_url}\n"
             f"Цена: {updated.price_rub} руб.\n"
@@ -1561,7 +1622,7 @@ def run_local_agent_loop(
     offset: int | None = None
     send_outreach = (
         (lambda order, text: _send_marketplace_outreach(config, order, text))
-        if config.freelancehunt_api_token
+        if config.freelancehunt_api_token or (config.smtp_host and config.smtp_from)
         else None
     )
     send_delivery = (
@@ -1588,21 +1649,33 @@ def run_local_agent_loop(
 def _send_marketplace_outreach(config: Config, order: Order, text: str) -> None:
     if not order.contact:
         raise RuntimeError("order has no contact")
-    if order.contact.channel != "freelancehunt":
-        raise RuntimeError(f"unsupported contact channel: {order.contact.channel}")
-    if not config.freelancehunt_api_token:
-        raise RuntimeError("FREELANCEHUNT_API_TOKEN is required")
-
-    client = FreelancehuntClient(api_token=config.freelancehunt_api_token)
-    client.add_bid(
-        project_id=order.contact.value,
-        bid=FreelancehuntBid(
-            days=config.freelancehunt_bid_days,
-            amount_rub=order.price_rub or config.auto_max_price_rub,
-            comment=text,
-            safe_type=config.freelancehunt_bid_safe_type,
-        ),
-    )
+    if order.contact.channel == "email":
+        if not config.smtp_host or not config.smtp_from:
+            raise RuntimeError("SMTP_HOST and SMTP_FROM are required")
+        SMTPOutreachClient(
+            host=config.smtp_host,
+            port=config.smtp_port,
+            username=config.smtp_username,
+            password=config.smtp_password,
+            from_email=config.smtp_from,
+            use_ssl=config.smtp_use_ssl,
+        ).send(order, text)
+        return
+    if order.contact.channel == "freelancehunt":
+        if not config.freelancehunt_api_token:
+            raise RuntimeError("FREELANCEHUNT_API_TOKEN is required")
+        client = FreelancehuntClient(api_token=config.freelancehunt_api_token)
+        client.add_bid(
+            project_id=order.contact.value,
+            bid=FreelancehuntBid(
+                days=config.freelancehunt_bid_days,
+                amount_rub=order.price_rub or config.auto_max_price_rub,
+                comment=text,
+                safe_type=config.freelancehunt_bid_safe_type,
+            ),
+        )
+        return
+    raise RuntimeError(f"unsupported contact channel: {order.contact.channel}")
 
 
 def _send_marketplace_delivery(config: Config, order: Order, text: str) -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -11,6 +11,8 @@ DEFAULT_RSS_FEEDS = [
     "https://www.fl.ru/rss/projects.xml",
     "https://freelancehunt.com/projects.rss",
 ]
+DEFAULT_PUBLIC_PROJECT_SOURCES = ["freelance_ru", "pchel"]
+DEFAULT_PUBLIC_SOURCE_PROBES = ["kwork", "workzilla"]
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,14 @@ class Config:
     auto_revision_daily_limit: int = 5
     auto_status_report_enabled: bool = False
     auto_status_report_interval_minutes: int = 360
+    public_project_sources: list[str] = field(default_factory=list)
+    public_source_probes: list[str] = field(default_factory=list)
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str | None = None
+    smtp_use_ssl: bool = False
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -54,6 +64,14 @@ class Config:
         chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
         channels = _csv(os.environ.get("TELEGRAM_CHANNELS")) or DEFAULT_CHANNELS
         rss_feeds = _csv(os.environ.get("RSS_FEEDS")) or DEFAULT_RSS_FEEDS
+        public_project_sources = _csv(os.environ.get("PUBLIC_PROJECT_SOURCES")) or DEFAULT_PUBLIC_PROJECT_SOURCES
+        public_source_probes = _csv(os.environ.get("PUBLIC_SOURCE_PROBES")) or DEFAULT_PUBLIC_SOURCE_PROBES
+        smtp_host = os.environ.get("SMTP_HOST", "").strip() or None
+        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+        smtp_username = os.environ.get("SMTP_USERNAME", "").strip()
+        smtp_password = os.environ.get("SMTP_PASSWORD", "")
+        smtp_from = os.environ.get("SMTP_FROM", "").strip() or None
+        smtp_use_ssl = _env_bool("SMTP_USE_SSL")
         state_path = Path(os.environ.get("STATE_PATH", "data/seen_posts.json"))
         send_first_run = os.environ.get("SEND_FIRST_RUN", "").lower() in {"1", "true", "yes"}
         orders_path = Path(os.environ.get("ORDERS_PATH", "orders"))
@@ -126,6 +144,14 @@ class Config:
             auto_revision_daily_limit=auto_revision_daily_limit,
             auto_status_report_enabled=auto_status_report_enabled,
             auto_status_report_interval_minutes=auto_status_report_interval_minutes,
+            public_project_sources=public_project_sources,
+            public_source_probes=public_source_probes,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_username=smtp_username,
+            smtp_password=smtp_password,
+            smtp_from=smtp_from,
+            smtp_use_ssl=smtp_use_ssl,
         )
 
 

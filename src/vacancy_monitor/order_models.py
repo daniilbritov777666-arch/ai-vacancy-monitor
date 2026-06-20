@@ -24,6 +24,7 @@ class OrderStatus(StrEnum):
     AWAITING_DELIVERY_APPROVAL = "awaiting_delivery_approval"
     PAYMENT_REQUESTED = "payment_requested"
     QUALITY_FAILED = "quality_failed"
+    CONTACT_UNAVAILABLE = "contact_unavailable"
     SKIPPED = "skipped"
     CLOSED = "closed"
 
@@ -125,6 +126,9 @@ def _contact_from_post(post: Post) -> CustomerContact | None:
     project_id = _freelancehunt_project_id(post.url) or _freelancehunt_project_id(post.post_id)
     if project_id:
         return CustomerContact(channel="freelancehunt", value=project_id, can_auto_send=True)
+    email_match = re.search(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+", post.text, flags=re.IGNORECASE)
+    if email_match:
+        return CustomerContact(channel="email", value=email_match.group(0), can_auto_send=True)
     return None
 
 

@@ -34,7 +34,10 @@
 - `AUTO_MODE=off` - только поиск заказов и кнопки в Telegram.
 - `AUTO_MODE=draft` - AI готовит файлы в папке заказа, но статус заказа не продвигает.
 - `AUTO_MODE=autopilot` - AI готовит файлы и переводит безопасный заказ в `draft_ready`, если цена не выше `AUTO_MAX_PRICE_RUB`.
-- `AUTO_OUTREACH_ENABLED=true` - агент может сам отправлять первый безопасный отклик на Freelancehunt.
+- `AUTO_OUTREACH_ENABLED=true` - агент может сам отправлять первый безопасный отклик через Freelancehunt API или опубликованный email.
+- `PUBLIC_PROJECT_SOURCES=freelance_ru,pchel` - включает дополнительные живые страницы разовых проектов.
+- `PUBLIC_SOURCE_PROBES=kwork,workzilla` - проверяет доступность площадок без импорта демонстрационных заданий.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_SSL` - канал первого email-отклика; если он не настроен, мониторинг источников все равно работает.
 - `AUTO_CONVERSATION_ENABLED=true` - агент читает входящие треды Freelancehunt, сохраняет переписку, готовит AI-черновик ответа и уведомляет Telegram.
 - `AUTO_REPLY_ENABLED=true` - агент сам отправляет безопасные последующие ответы в тред Freelancehunt.
 - `AUTO_EXECUTION_ENABLED=true` - агент создает рабочий пакет выполнения и стартовые артефакты результата после ответа заказчика.
@@ -76,8 +79,9 @@ AI-слой пишет:
 - `orders/<order_id>/revisions/manual_review_required.json`.
 - `orders/reports/freelancehunt_live_api_audit.json`.
 - `orders/reports/status_report.md`.
+- `orders/reports/public_sources_health.json`.
 
-Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher статуса - через `AUTO_PAYMENT_WATCH_ENABLED=true`, Telegram-отчет - через `AUTO_STATUS_REPORT_ENABLED=true`. В `autopilot` рискованные и неопределенные заказы автоматически получают статус `skipped`, без запроса ручного подтверждения. Закрытие заказа выполняется только для победившей ставки при финальном статусе проекта из API Freelancehunt; фактическое поступление денег проверяется на балансе биржи.
+Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher статуса - через `AUTO_PAYMENT_WATCH_ENABLED=true`, Telegram-отчет - через `AUTO_STATUS_REPORT_ENABLED=true`. В `autopilot` рискованные и неопределенные заказы автоматически получают статус `skipped`, а заказ без рабочего канала связи - `contact_unavailable`, без запроса ручного подтверждения. Полный цикл после первого email-отклика невозможен без двустороннего почтового входящего канала; закрытие заказа на Freelancehunt выполняется только для победившей ставки при финальном статусе проекта из API. Фактическое поступление денег проверяется на балансе биржи.
 
 ## Быстрый запуск на новом Mac
 

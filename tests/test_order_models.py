@@ -65,3 +65,20 @@ def test_make_order_from_freelancehunt_post_enables_api_contact():
     assert order.contact.channel == "freelancehunt"
     assert order.contact.value == "123456"
     assert order.contact.can_auto_send is True
+
+
+def test_make_order_from_public_post_extracts_email_contact():
+    post = Post(
+        source="freelance.ru",
+        post_id="freelance_ru:3272",
+        url="https://freelance.ru/task/view/3272",
+        text="Нужен Telegram-бот. Контакт: client@example.ru",
+        published_at="2026-06-20T12:00:00+03:00",
+    )
+
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+
+    assert order.contact is not None
+    assert order.contact.channel == "email"
+    assert order.contact.value == "client@example.ru"
+    assert order.contact.can_auto_send is True

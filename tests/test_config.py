@@ -10,6 +10,20 @@ def test_default_sources_are_project_feeds_only(monkeypatch):
 
     assert config.channels == []
     assert "https://www.fl.ru/rss/projects.xml" in config.rss_feeds
+    assert config.public_project_sources == ["freelance_ru", "pchel"]
+    assert config.public_source_probes == ["kwork", "workzilla"]
+
+
+def test_public_sources_read_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("PUBLIC_PROJECT_SOURCES", "pchel")
+    monkeypatch.setenv("PUBLIC_SOURCE_PROBES", "workzilla")
+
+    config = Config.from_env()
+
+    assert config.public_project_sources == ["pchel"]
+    assert config.public_source_probes == ["workzilla"]
 
 
 def test_autopilot_config_defaults(monkeypatch):
@@ -107,6 +121,26 @@ def test_auto_outreach_config_reads_env(monkeypatch):
     assert config.auto_outreach_enabled is True
     assert config.auto_outreach_daily_limit == 4
     assert config.auto_outreach_max_age_hours == 36
+
+
+def test_smtp_config_reads_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.ru")
+    monkeypatch.setenv("SMTP_PORT", "465")
+    monkeypatch.setenv("SMTP_USERNAME", "robot@example.ru")
+    monkeypatch.setenv("SMTP_PASSWORD", "secret")
+    monkeypatch.setenv("SMTP_FROM", "robot@example.ru")
+    monkeypatch.setenv("SMTP_USE_SSL", "true")
+
+    config = Config.from_env()
+
+    assert config.smtp_host == "smtp.example.ru"
+    assert config.smtp_port == 465
+    assert config.smtp_username == "robot@example.ru"
+    assert config.smtp_password == "secret"
+    assert config.smtp_from == "robot@example.ru"
+    assert config.smtp_use_ssl is True
 
 
 def test_conversation_config_reads_env(monkeypatch):

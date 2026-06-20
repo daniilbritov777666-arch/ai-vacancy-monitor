@@ -7,6 +7,7 @@ from typing import Callable
 from vacancy_monitor.config import Config
 from vacancy_monitor.filtering import evaluate_post, format_match_message
 from vacancy_monitor.models import MatchResult, Post
+from vacancy_monitor.public_sources import fetch_public_project_posts
 from vacancy_monitor.sources import fetch_channel_posts, fetch_rss_posts as fetch_rss_feed_posts
 from vacancy_monitor.state import SeenState
 from vacancy_monitor.telegram import send_telegram_message
@@ -25,9 +26,11 @@ def run_monitor(
     *,
     channels: list[str],
     rss_feeds: list[str] | None = None,
+    public_project_sources: list[str] | None = None,
     state_path: Path,
     fetch_posts: Callable[[str], list[Post]],
     fetch_rss_posts: Callable[[str], list[Post]] | None = None,
+    fetch_public_posts: Callable[[str], list[Post]] | None = None,
     send_message: Callable[[str], None],
     send_first_run: bool,
     on_match: Callable[[Post, MatchResult], None] | None = None,
@@ -44,6 +47,8 @@ def run_monitor(
     sources = [(channel, fetch_posts) for channel in channels]
     if rss_feeds and fetch_rss_posts:
         sources.extend((feed, fetch_rss_posts) for feed in rss_feeds)
+    if public_project_sources and fetch_public_posts:
+        sources.extend((source, fetch_public_posts) for source in public_project_sources)
 
     for source, fetcher in sources:
         try:
@@ -93,9 +98,11 @@ def main() -> int:
     summary = run_monitor(
         channels=config.channels,
         rss_feeds=config.rss_feeds,
+        public_project_sources=config.public_project_sources,
         state_path=config.state_path,
         fetch_posts=fetch_channel_posts,
         fetch_rss_posts=fetch_rss_feed_posts,
+        fetch_public_posts=fetch_public_project_posts,
         send_message=lambda text: send_telegram_message(config.bot_token, config.chat_id, text),
         send_first_run=config.send_first_run,
     )

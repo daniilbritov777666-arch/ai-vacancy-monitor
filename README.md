@@ -6,11 +6,13 @@
 
 - GitHub Actions запускает проверку каждые 5 минут.
 - Скрипт читает публичные страницы `https://t.me/s/<channel>`.
-- Скрипт также читает публичные RSS-ленты фриланс-заказов FL.ru и Freelancehunt.
+- Скрипт читает публичные RSS-ленты FL.ru/Freelancehunt и живые страницы разовых проектов Freelance.ru/Pchel.net.
+- Kwork и Workzilla проверяются только на доступность: их публичные страницы не дают подтвержденный серверный поток живых проектов.
 - В ручном режиме подходящие заказы отправляются в Telegram с кнопками подтверждения; в `autopilot` безопасные заказы проходят без кнопок.
 - Локальный агент создает отдельную папку заказа в `orders/`.
 - AI-слой может подготовить анализ, отклик, план, черновик результата и сообщение заказчику.
 - Если заказ пришел с Freelancehunt и задан `FREELANCEHUNT_API_TOKEN`, автопилот отправляет первый безопасный отклик через официальный API Freelancehunt.
+- Если в публичном проекте указан email и настроен SMTP, автопилот отправляет первый отклик по email. Без доступного контакта заказ получает `contact_unavailable`.
 - Если включен `AUTO_CONVERSATION_ENABLED`, локальный агент читает входящие треды Freelancehunt, сохраняет переписку в папку заказа, готовит AI-черновик ответа и уведомляет Telegram.
 - Если включен `AUTO_REPLY_ENABLED`, безопасные последующие ответы отправляются заказчику на Freelancehunt автоматически.
 - Если включен `AUTO_EXECUTION_ENABLED`, агент создает рабочий пакет выполнения и стартовые артефакты результата в папке заказа.
@@ -54,6 +56,8 @@
 
 - `TELEGRAM_CHANNELS` - список каналов через запятую. По умолчанию: `mari_vakansii,digitaltender,FreeVacanciesIT`.
 - `RSS_FEEDS` - список RSS-лент через запятую. По умолчанию: `https://www.fl.ru/rss/projects.xml,https://freelancehunt.com/projects.rss`.
+- `PUBLIC_PROJECT_SOURCES` - живые HTML-источники проектов. По умолчанию: `freelance_ru,pchel`.
+- `PUBLIC_SOURCE_PROBES` - площадки только для проверки доступности. По умолчанию: `kwork,workzilla`.
 - `SEND_FIRST_RUN` - поставь `true`, если хочешь отправить подходящие посты уже при первом запуске. По умолчанию старые посты только помечаются просмотренными.
 
 ## Локальная проверка
@@ -108,7 +112,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `OPENAI_MODEL` - модель OpenAI. По умолчанию `gpt-4.1-mini`.
 - `OPENAI_BASE_URL` - базовый URL OpenAI-compatible API. По умолчанию `https://api.openai.com/v1`.
 - `AUTO_MAX_PRICE_RUB` - максимальная цена, при которой `autopilot` может сам продвинуть заказ до черновика. По умолчанию `15000`.
-- `AUTO_OUTREACH_ENABLED` - разрешает агенту самому отправлять первый безопасный отклик на Freelancehunt после AI-проверки. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
+- `AUTO_OUTREACH_ENABLED` - разрешает агенту самому отправлять первый безопасный отклик через API Freelancehunt или на опубликованный email после AI-проверки. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_OUTREACH_DAILY_LIMIT` - дневной лимит автооткликов. По умолчанию `3`.
 - `AUTO_OUTREACH_MAX_AGE_HOURS` - максимальный возраст проекта для автоотклика. По умолчанию `24` часа.
 - `AUTO_CONVERSATION_ENABLED` - разрешает читать входящие треды Freelancehunt, сохранять их в `conversation.md`/`inbox/`, готовить AI-черновик ответа в `outbox/` и уведомлять Telegram. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
@@ -128,6 +132,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `FREELANCEHUNT_API_TOKEN` - API-токен Freelancehunt для отправки отклика через `POST /v2/projects/{project_id}/bids`.
 - `FREELANCEHUNT_BID_SAFE_TYPE` - тип безопасной сделки Freelancehunt: `employer`, `developer`, `split` или `employer_cashless`. По умолчанию `employer`.
 - `FREELANCEHUNT_BID_DAYS` - срок выполнения в днях для первого отклика. По умолчанию `2`.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_SSL` - SMTP для автоотклика на опубликованный email. Обычно порт `587` и STARTTLS; для SMTP SSL используется порт `465` и `SMTP_USE_SSL=true`.
 
 Файлы AI-слоя в папке заказа:
 
@@ -155,6 +160,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `revisions/manual_review_required.json` - заблокированный запрос правок, который не был выполнен автоматически.
 - `reports/freelancehunt_live_api_audit.json` - последний live-аудит `threads`/`my/bids` Freelancehunt.
 - `reports/status_report.md` - последний Telegram-отчет состояния агента.
+- `reports/public_sources_health.json` - результат последней проверки Freelance.ru, Pchel.net, Kwork и Workzilla.
 
 Проверка готовности бирж, переписки и платежей:
 
@@ -168,4 +174,4 @@ PYTHONPATH=src python3 -m vacancy_monitor.business_setup
 
 GitHub Actions schedule не гарантирует запуск ровно в секунду и не умеет чаще одного раза в 5 минут. Приватные Telegram-каналы через `t.me/s` не читаются; бот увидит только публичные веб-доступные посты.
 
-Сейчас автоотправка первого отклика, чтение входящей переписки, автоотправка безопасных последующих ответов, подготовка рабочих пакетов, AI-пакетов результата, автосдача результата, watcher оплаты и автоправки поддержаны для Freelancehunt через официальный API. В `AUTO_MODE=autopilot` агент не ждет ручных подтверждений и действует сам в пределах настроенных лимитов, токенов и safety-фильтров.
+Полный цикл переписки, сдачи, статуса сделки и правок поддержан для Freelancehunt через официальный API. Freelance.ru и Pchel.net расширяют поиск; первый отклик отправляется только при явно опубликованном email и настроенном SMTP. Биржевые действия без официального API, авторизованного канала или открытого контакта агент не имитирует.
