@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import replace
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from time import sleep
 from typing import Protocol
 
@@ -35,6 +35,14 @@ from vacancy_monitor.freelancehunt import (
     FreelancehuntThreadMessage,
 )
 from vacancy_monitor.models import MatchResult, Post
+from vacancy_monitor.job_queue import AgentJobQueue
+from vacancy_monitor.job_worker import (
+    is_retryable_job_error,
+    retry_delay_seconds,
+    write_dead_letter,
+    write_job_attempt,
+    write_queue_health,
+)
 from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.public_sources import (
@@ -125,8 +133,16 @@ def run_local_agent_once(
     freelancehunt_client: FreelancehuntConversationClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
     execution_draft_client: ExecutionDraftClient | None = None,
+    process_jobs: bool = True,
 ) -> MonitorSummary:
     store = OrderStore(config.orders_path)
+    queue = None
+    recovered_leases = 0
+    queue_enabled = bool(config.agent_queue_enabled and config.auto_mode != "off" and config.openai_api_key)
+    if queue_enabled:
+        queue = AgentJobQueue(config.agent_queue_path or (config.orders_path / "agent_jobs.sqlite3"))
+        recovered_leases = queue.release_expired_leases(now=datetime.now(tz=UTC))
+        _reconcile_agent_jobs(config=config, store=store, queue=queue)
     public_health: list[PublicSourceHealth] = []
     public_posts: dict[str, list[Post]] = {}
     public_errors: dict[str, Exception] = {}
@@ -193,14 +209,17 @@ def run_local_agent_once(
                 else (lambda text, reply_markup: sender(text, reply_markup=reply_markup))
             ),
         )
-        _maybe_run_autopilot(
-            config=config,
-            order=order,
-            store=store,
-            sender=sender,
-            autopilot_client=autopilot_client,
-            send_outreach=outreach_sender,
-        )
+        if queue is not None:
+            _enqueue_advance_order(config=config, queue=queue, order=order)
+        else:
+            _maybe_run_autopilot(
+                config=config,
+                order=order,
+                store=store,
+                sender=sender,
+                autopilot_client=autopilot_client,
+                send_outreach=outreach_sender,
+            )
 
     summary = run_monitor(
         channels=config.channels,
@@ -214,13 +233,32 @@ def run_local_agent_once(
         send_first_run=config.send_first_run,
         on_match=on_match,
     )
-    _process_pending_autopilot_orders(
-        config=config,
-        store=store,
-        sender=sender,
-        autopilot_client=autopilot_client,
-        send_outreach=outreach_sender,
-    )
+    if queue is not None:
+        if process_jobs:
+            _process_agent_jobs(
+                config=config,
+                store=store,
+                queue=queue,
+                sender=sender,
+                autopilot_client=autopilot_client,
+                send_outreach=outreach_sender,
+                recovered_leases=recovered_leases,
+            )
+        else:
+            write_queue_health(
+                path=config.orders_path / "reports" / "job_queue_health.json",
+                queue=queue,
+                recovered_leases=recovered_leases,
+                now=datetime.now(tz=UTC),
+            )
+    else:
+        _process_pending_autopilot_orders(
+            config=config,
+            store=store,
+            sender=sender,
+            autopilot_client=autopilot_client,
+            send_outreach=outreach_sender,
+        )
     _process_pending_auto_outreach_orders(
         config=config,
         store=store,
@@ -249,6 +287,126 @@ def run_local_agent_once(
         freelancehunt_client=freelancehunt_client,
     )
     return summary
+
+
+def _enqueue_advance_order(*, config: Config, queue: AgentJobQueue, order: Order) -> None:
+    queue.enqueue(
+        order_id=order.order_id,
+        kind="advance_order",
+        payload={"version": 1},
+        idempotency_key=f"advance_order:{order.order_id}",
+        max_attempts=config.agent_job_max_attempts,
+        now=datetime.now(tz=UTC),
+    )
+
+
+def _reconcile_agent_jobs(*, config: Config, store: OrderStore, queue: AgentJobQueue) -> None:
+    for order in store.list_orders():
+        if order.status == OrderStatus.AWAITING_RESPONSE_APPROVAL:
+            _enqueue_advance_order(config=config, queue=queue, order=order)
+
+
+def _process_agent_jobs(
+    *,
+    config: Config,
+    store: OrderStore,
+    queue: AgentJobQueue,
+    sender: Callable[..., None],
+    autopilot_client: AutopilotClient | None,
+    send_outreach: Callable[[Order, str], None] | None,
+    recovered_leases: int,
+) -> None:
+    for _ in range(config.agent_jobs_per_cycle):
+        claimed_at = datetime.now(tz=UTC)
+        job = queue.claim_next(lease_seconds=config.agent_job_lease_seconds, now=claimed_at)
+        if job is None:
+            break
+        try:
+            order = store.load_order(job.order_id)
+            if job.kind != "advance_order":
+                raise ValueError(f"unsupported job kind: {job.kind}")
+            if order.status != OrderStatus.AWAITING_RESPONSE_APPROVAL:
+                queue.complete(job.job_id, now=datetime.now(tz=UTC))
+                write_job_attempt(
+                    order_dir=store.order_dir(order.order_id),
+                    job=job,
+                    outcome="already_advanced",
+                    error=None,
+                    now=datetime.now(tz=UTC),
+                )
+                continue
+            analysis_path = store.order_dir(order.order_id) / "autopilot" / "analysis.json"
+            if analysis_path.exists():
+                if config.auto_mode == "autopilot":
+                    store.update_status(order.order_id, OrderStatus.SKIPPED)
+                queue.complete(job.job_id, now=datetime.now(tz=UTC))
+                write_job_attempt(
+                    order_dir=store.order_dir(order.order_id),
+                    job=job,
+                    outcome="existing_analysis",
+                    error=None,
+                    now=datetime.now(tz=UTC),
+                )
+                continue
+            _maybe_run_autopilot(
+                config=config,
+                order=order,
+                store=store,
+                sender=sender,
+                autopilot_client=autopilot_client,
+                send_outreach=send_outreach,
+                raise_on_error=True,
+            )
+        except Exception as exc:
+            terminal = not is_retryable_job_error(exc) or job.attempts >= job.max_attempts
+            if terminal:
+                queue.fail(job.job_id, exc, now=datetime.now(tz=UTC))
+                write_job_attempt(
+                    order_dir=store.order_dir(job.order_id),
+                    job=job,
+                    outcome="dead",
+                    error=exc,
+                    now=datetime.now(tz=UTC),
+                )
+                write_dead_letter(
+                    order_dir=store.order_dir(job.order_id),
+                    job=job,
+                    error=exc,
+                    now=datetime.now(tz=UTC),
+                )
+                _safe_notify(
+                    sender,
+                    f"Фоновая обработка заказа {job.order_id} окончательно остановлена: {type(exc).__name__}.",
+                )
+            else:
+                queue.retry(
+                    job.job_id,
+                    exc,
+                    delay_seconds=retry_delay_seconds(job.attempts, job.job_id),
+                    now=datetime.now(tz=UTC),
+                )
+                write_job_attempt(
+                    order_dir=store.order_dir(job.order_id),
+                    job=job,
+                    outcome="retry",
+                    error=exc,
+                    now=datetime.now(tz=UTC),
+                )
+            continue
+        queue.complete(job.job_id, now=datetime.now(tz=UTC))
+        write_job_attempt(
+            order_dir=store.order_dir(job.order_id),
+            job=job,
+            outcome="succeeded",
+            error=None,
+            now=datetime.now(tz=UTC),
+        )
+    write_queue_health(
+        path=config.orders_path / "reports" / "job_queue_health.json",
+        queue=queue,
+        recovered_leases=recovered_leases,
+        now=datetime.now(tz=UTC),
+    )
 
 
 def _process_pending_autopilot_orders(
@@ -1284,6 +1442,7 @@ def _maybe_run_autopilot(
     sender: Callable[..., None],
     autopilot_client: AutopilotClient | None,
     send_outreach: Callable[[Order, str], None] | None,
+    raise_on_error: bool = False,
 ) -> Order:
     if config.auto_mode == "off" or not config.openai_api_key:
         return order
@@ -1310,6 +1469,8 @@ def _maybe_run_autopilot(
             send_outreach=send_outreach,
         )
     except Exception as exc:
+        if raise_on_error:
+            raise
         _safe_notify(sender, f"AI-черновик по заказу {order.order_id} не создан: {type(exc).__name__}")
         return order
 

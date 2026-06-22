@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
@@ -9,11 +10,13 @@ from vacancy_monitor.config import Config
 from vacancy_monitor.execution import ExecutionDraftPackage
 from vacancy_monitor.freelancehunt import FreelancehuntMyBid, FreelancehuntThread, FreelancehuntThreadMessage
 from vacancy_monitor.local_agent_cli import (
+    _process_agent_jobs,
     handle_order_callback,
     poll_telegram_once,
     poll_telegram_safely,
     run_local_agent_once,
 )
+from vacancy_monitor.job_queue import AgentJobQueue, JobStatus
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
@@ -169,6 +172,188 @@ class FakeQualityExecutionClient(FakeExecutionDraftClient):
 class FailingAutopilotClient:
     def analyze_order(self, order):
         raise RuntimeError("provider failed")
+
+
+class TimeoutAutopilotClient:
+    def __init__(self):
+        self.orders = []
+
+    def analyze_order(self, order):
+        self.orders.append(order)
+        raise requests.Timeout("provider timeout")
+
+
+class HTTPErrorAutopilotClient:
+    def __init__(self, status_code):
+        self.status_code = status_code
+        self.orders = []
+
+    def analyze_order(self, order):
+        self.orders.append(order)
+        error = requests.HTTPError(f"{self.status_code} Client Error")
+        error.response = type("Response", (), {"status_code": self.status_code})()
+        raise error
+
+
+def queued_config(tmp_path) -> Config:
+    return replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        agent_queue_enabled=True,
+        agent_queue_path=tmp_path / "orders" / "agent_jobs.sqlite3",
+        agent_jobs_per_cycle=3,
+        agent_job_max_attempts=4,
+        agent_job_lease_seconds=600,
+    )
+
+
+def queue_test_post(post_id="sample/queued-1") -> Post:
+    return Post(
+        source="sample",
+        post_id=post_id,
+        url=f"https://example.com/{post_id}",
+        text="Нужен Telegram-бот для заявок и Google Sheets. Оплата 12 000 руб.",
+        published_at="2026-06-22T09:00:00+03:00",
+    )
+
+
+def test_queue_producer_does_not_call_ai_inside_monitor(tmp_path):
+    config = queued_config(tmp_path)
+    client = FakeAutopilotClient(safe_autopilot_result())
+
+    summary = run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [queue_test_post()],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=client,
+        process_jobs=False,
+    )
+
+    assert summary.sent == 1
+    assert client.orders == []
+    queue = AgentJobQueue(config.agent_queue_path)
+    job = queue.enqueue(
+        order_id=OrderStore(config.orders_path).list_orders()[0].order_id,
+        kind="advance_order",
+        payload={"version": 1},
+        idempotency_key=f"advance_order:{OrderStore(config.orders_path).list_orders()[0].order_id}",
+        max_attempts=4,
+        now=datetime.now(tz=UTC),
+    )
+    assert job.status == JobStatus.PENDING
+
+
+def test_queue_worker_advances_order_once(tmp_path):
+    config = queued_config(tmp_path)
+    client = FakeAutopilotClient(safe_autopilot_result())
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [queue_test_post()],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=client,
+    )
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=client,
+    )
+
+    assert len(client.orders) == 1
+    queue = AgentJobQueue(config.agent_queue_path)
+    assert queue.counts() == {"succeeded": 1}
+
+
+def test_queue_worker_retries_timeout_without_telegram_spam(tmp_path):
+    config = queued_config(tmp_path)
+    client = TimeoutAutopilotClient()
+    sent = []
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [queue_test_post()],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append(text),
+        autopilot_client=client,
+    )
+
+    queue = AgentJobQueue(config.agent_queue_path)
+    assert queue.counts() == {"pending": 1}
+    assert len(client.orders) == 1
+    assert not any("AI-черновик" in text for text in sent)
+
+
+def test_queue_worker_dead_letters_terminal_http_error_once(tmp_path):
+    config = queued_config(tmp_path)
+    client = HTTPErrorAutopilotClient(422)
+    sent = []
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [queue_test_post()],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append(text),
+        autopilot_client=client,
+    )
+
+    queue = AgentJobQueue(config.agent_queue_path)
+    assert queue.counts() == {"dead": 1}
+    order = OrderStore(config.orders_path).list_orders()[0]
+    assert (config.orders_path / order.order_id / "jobs" / "dead.json").exists()
+    assert sum("окончательно остановлена" in text for text in sent) == 1
+
+
+def test_queue_worker_dead_letters_exhausted_retry(tmp_path):
+    config = replace(queued_config(tmp_path), agent_job_max_attempts=1)
+    client = TimeoutAutopilotClient()
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [queue_test_post()],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=client,
+    )
+
+    assert AgentJobQueue(config.agent_queue_path).counts() == {"dead": 1}
+
+
+def test_queue_worker_completes_job_for_already_advanced_order(tmp_path):
+    config = queued_config(tmp_path)
+    store = OrderStore(config.orders_path)
+    order = replace(
+        make_order_from_post(queue_test_post(), category="Telegram-боты"),
+        status=OrderStatus.SKIPPED,
+    )
+    store.save_order(order)
+    queue = AgentJobQueue(config.agent_queue_path)
+    queue.enqueue(
+        order_id=order.order_id,
+        kind="advance_order",
+        payload={"version": 1},
+        idempotency_key=f"advance_order:{order.order_id}",
+        max_attempts=4,
+        now=datetime.now(tz=UTC),
+    )
+    client = FakeAutopilotClient(safe_autopilot_result())
+
+    _process_agent_jobs(
+        config=config,
+        store=store,
+        queue=queue,
+        sender=lambda text, reply_markup=None: None,
+        autopilot_client=client,
+        send_outreach=None,
+        recovered_leases=0,
+    )
+
+    assert client.orders == []
+    assert queue.counts() == {"succeeded": 1}
 
 
 class FakeFreelancehuntConversationClient:
