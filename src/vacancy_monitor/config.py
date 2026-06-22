@@ -62,6 +62,14 @@ class Config:
     agent_jobs_per_cycle: int = 3
     agent_job_max_attempts: int = 4
     agent_job_lease_seconds: int = 600
+    execution_verify_enabled: bool = False
+    execution_runtime: str = "docker"
+    execution_python_image: str = "freelance-agent-python-runner:3.12-v1"
+    execution_node_image: str = "node:22-slim"
+    execution_timeout_seconds: int = 120
+    execution_memory_mb: int = 512
+    execution_cpus: float = 1.0
+    execution_max_output_bytes: int = 65536
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -111,6 +119,14 @@ class Config:
         agent_jobs_per_cycle = min(20, max(1, int(os.environ.get("AGENT_JOBS_PER_CYCLE", "3"))))
         agent_job_max_attempts = min(8, max(1, int(os.environ.get("AGENT_JOB_MAX_ATTEMPTS", "4"))))
         agent_job_lease_seconds = min(3600, max(30, int(os.environ.get("AGENT_JOB_LEASE_SECONDS", "600"))))
+        execution_verify_enabled = _env_bool("EXECUTION_VERIFY_ENABLED", default=autonomous_default)
+        execution_runtime = os.environ.get("EXECUTION_RUNTIME", "docker").strip().lower()
+        execution_python_image = os.environ.get("EXECUTION_PYTHON_IMAGE", "freelance-agent-python-runner:3.12-v1").strip()
+        execution_node_image = os.environ.get("EXECUTION_NODE_IMAGE", "node:22-slim").strip()
+        execution_timeout_seconds = min(600, max(10, int(os.environ.get("EXECUTION_TIMEOUT_SECONDS", "120"))))
+        execution_memory_mb = min(2048, max(128, int(os.environ.get("EXECUTION_MEMORY_MB", "512"))))
+        execution_cpus = min(2.0, max(0.25, float(os.environ.get("EXECUTION_CPUS", "1.0"))))
+        execution_max_output_bytes = min(262144, max(4096, int(os.environ.get("EXECUTION_MAX_OUTPUT_BYTES", "65536"))))
 
         if not bot_token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
@@ -167,6 +183,14 @@ class Config:
             agent_jobs_per_cycle=agent_jobs_per_cycle,
             agent_job_max_attempts=agent_job_max_attempts,
             agent_job_lease_seconds=agent_job_lease_seconds,
+            execution_verify_enabled=execution_verify_enabled,
+            execution_runtime=execution_runtime,
+            execution_python_image=execution_python_image,
+            execution_node_image=execution_node_image,
+            execution_timeout_seconds=execution_timeout_seconds,
+            execution_memory_mb=execution_memory_mb,
+            execution_cpus=execution_cpus,
+            execution_max_output_bytes=execution_max_output_bytes,
         )
 
 

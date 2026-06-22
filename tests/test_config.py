@@ -82,6 +82,14 @@ def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
     assert config.agent_jobs_per_cycle == 3
     assert config.agent_job_max_attempts == 4
     assert config.agent_job_lease_seconds == 600
+    assert config.execution_verify_enabled is True
+    assert config.execution_runtime == "docker"
+    assert config.execution_python_image == "freelance-agent-python-runner:3.12-v1"
+    assert config.execution_node_image == "node:22-slim"
+    assert config.execution_timeout_seconds == 120
+    assert config.execution_memory_mb == 512
+    assert config.execution_cpus == 1.0
+    assert config.execution_max_output_bytes == 65536
 
 
 def test_autopilot_mode_allows_explicit_autonomous_flag_override(monkeypatch):
@@ -117,6 +125,22 @@ def test_agent_queue_config_reads_and_bounds_env(monkeypatch, tmp_path):
     assert config.agent_jobs_per_cycle == 20
     assert config.agent_job_max_attempts == 8
     assert config.agent_job_lease_seconds == 30
+
+
+def test_execution_verifier_config_bounds_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("EXECUTION_TIMEOUT_SECONDS", "999")
+    monkeypatch.setenv("EXECUTION_MEMORY_MB", "10")
+    monkeypatch.setenv("EXECUTION_CPUS", "5")
+    monkeypatch.setenv("EXECUTION_MAX_OUTPUT_BYTES", "100")
+
+    config = Config.from_env()
+
+    assert config.execution_timeout_seconds == 600
+    assert config.execution_memory_mb == 128
+    assert config.execution_cpus == 2.0
+    assert config.execution_max_output_bytes == 4096
 
 
 def test_freelancehunt_config_reads_env(monkeypatch):
