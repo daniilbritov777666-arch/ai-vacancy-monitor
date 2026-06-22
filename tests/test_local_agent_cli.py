@@ -2,6 +2,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import requests
+
 from vacancy_monitor.autopilot import AutopilotResult
 from vacancy_monitor.config import Config
 from vacancy_monitor.execution import ExecutionDraftPackage
@@ -407,6 +409,96 @@ def test_run_local_agent_auto_sends_safe_freelancehunt_outreach(tmp_path):
     assert any("Автоотклик отправлен" in message for message, _ in sent)
     assert not any("Новый заказ на подтверждение" in message for message, _ in sent)
     assert all(reply_markup is None for _, reply_markup in sent)
+
+
+def test_run_local_agent_writes_send_failure_diagnostics_for_failed_outreach(tmp_path):
+    sent = []
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_token="fh-token",
+        auto_outreach_enabled=True,
+        channels=[],
+        rss_feeds=["https://freelancehunt.com/projects.rss"],
+    )
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, интеграция с Google Sheets. Оплата 12 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+
+    def failing_send_outreach(order, text):
+        error = requests.HTTPError("422 Client Error")
+        error.response = type("Response", (), {"status_code": 422})()
+        raise error
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [post],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        autopilot_client=FakeAutopilotClient(safe_autopilot_result()),
+        send_outreach=failing_send_outreach,
+    )
+
+    store = OrderStore(config.orders_path)
+    order_id = next(Path(config.orders_path).glob("*/state.json")).parent.name
+    order = store.load_order(order_id)
+    assert order.status == OrderStatus.SEND_FAILED
+
+    payload = json.loads(
+        (store.order_dir(order.order_id) / "outbox" / "send_failure.json").read_text(encoding="utf-8")
+    )
+    assert payload["error"] == "HTTPError"
+    assert payload["status_code"] == 422
+    assert payload["endpoint"] == "/projects/123456/bids"
+    assert any("не отправлен: HTTPError" in message for message, _ in sent)
+
+
+def test_run_local_agent_closes_order_when_freelancehunt_project_is_gone(tmp_path):
+    sent = []
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_token="fh-token",
+        auto_outreach_enabled=True,
+        channels=[],
+        rss_feeds=["https://freelancehunt.com/projects.rss"],
+    )
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, интеграция с Google Sheets. Оплата 12 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+
+    def gone_send_outreach(order, text):
+        error = requests.HTTPError("410 Client Error")
+        error.response = type("Response", (), {"status_code": 410})()
+        raise error
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [post],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        autopilot_client=FakeAutopilotClient(safe_autopilot_result()),
+        send_outreach=gone_send_outreach,
+    )
+
+    store = OrderStore(config.orders_path)
+    order_id = next(Path(config.orders_path).glob("*/state.json")).parent.name
+    order = store.load_order(order_id)
+    assert order.status == OrderStatus.CLOSED
+    payload = json.loads(
+        (store.order_dir(order.order_id) / "outbox" / "send_failure.json").read_text(encoding="utf-8")
+    )
+    assert payload["status_code"] == 410
 
 
 def test_run_local_agent_auto_sends_when_ai_warnings_are_non_blocking(tmp_path):
@@ -1689,6 +1781,84 @@ def test_handle_order_callback_can_send_outreach_from_draft_ready(tmp_path):
     assert updated.status == OrderStatus.OUTREACH_SENT
     assert sent_orders == [(order.order_id, updated.latest_approved_outreach)]
     assert answers == ["Отклик отправлен через freelancehunt."]
+
+
+def test_handle_order_callback_writes_send_failure_diagnostics(tmp_path):
+    answers = []
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+    store.save_order(order)
+    order_dir = store.order_dir(order.order_id)
+    (order_dir / "autopilot").mkdir(parents=True)
+    (order_dir / "autopilot" / "outreach.md").write_text(
+        "Здравствуйте! Готов выполнить Telegram-бота для заявок.\n",
+        encoding="utf-8",
+    )
+
+    def failing_send_outreach(order, text):
+        error = requests.HTTPError("422 Client Error")
+        error.response = type("Response", (), {"status_code": 422})()
+        raise error
+
+    updated = handle_order_callback(
+        callback_data=f"o:ao:{order.order_id}",
+        store=store,
+        answer=answers.append,
+        send_outreach=failing_send_outreach,
+    )
+
+    assert updated is not None
+    assert updated.status == OrderStatus.SEND_FAILED
+    payload = json.loads((order_dir / "outbox" / "send_failure.json").read_text(encoding="utf-8"))
+    assert payload["error"] == "HTTPError"
+    assert payload["status_code"] == 422
+    assert payload["endpoint"] == "/projects/123456/bids"
+    assert answers == ["Отклик не отправлен: HTTPError."]
+
+
+def test_handle_order_callback_closes_order_when_freelancehunt_project_is_gone(tmp_path):
+    answers = []
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+    store.save_order(order)
+    order_dir = store.order_dir(order.order_id)
+    (order_dir / "autopilot").mkdir(parents=True)
+    (order_dir / "autopilot" / "outreach.md").write_text(
+        "Здравствуйте! Готов выполнить Telegram-бота для заявок.\n",
+        encoding="utf-8",
+    )
+
+    def gone_send_outreach(order, text):
+        error = requests.HTTPError("410 Client Error")
+        error.response = type("Response", (), {"status_code": 410})()
+        raise error
+
+    updated = handle_order_callback(
+        callback_data=f"o:ao:{order.order_id}",
+        store=store,
+        answer=answers.append,
+        send_outreach=gone_send_outreach,
+    )
+
+    assert updated is not None
+    assert updated.status == OrderStatus.CLOSED
+    payload = json.loads((order_dir / "outbox" / "send_failure.json").read_text(encoding="utf-8"))
+    assert payload["status_code"] == 410
+    assert answers == ["Отклик не отправлен: HTTPError."]
 
 
 def test_handle_order_callback_rejects_stale_transition(tmp_path):

@@ -401,6 +401,40 @@ def _write_bid_watch_error(*, store: OrderStore, exc: Exception) -> None:
     )
 
 
+def _write_outreach_send_failure(*, store: OrderStore, order: Order, exc: Exception) -> None:
+    path = store.order_dir(order.order_id) / "outbox" / "send_failure.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    payload = {
+        "checked_at": format_moscow_time(),
+        "error": type(exc).__name__,
+        "status_code": status_code,
+    }
+    if order.contact and order.contact.channel == "freelancehunt":
+        payload["endpoint"] = f"/projects/{order.contact.value}/bids"
+    detail = str(exc).strip()
+    if detail:
+        payload["detail"] = detail[:200]
+    path.write_text(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _outreach_failure_status(exc: Exception) -> OrderStatus:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if status_code == 410:
+        return OrderStatus.CLOSED
+    return OrderStatus.SEND_FAILED
+
+
 def _project_is_completed(bid: FreelancehuntMyBid) -> bool:
     text = (bid.project_status or "").lower()
     markers = [
@@ -1317,11 +1351,12 @@ def _maybe_auto_send_outreach(
     except Exception as exc:
         updated = replace(
             order,
-            status=OrderStatus.SEND_FAILED,
+            status=_outreach_failure_status(exc),
             latest_approved_outreach=outreach_text,
             updated_at=format_moscow_time(),
         )
         store.save_order(updated)
+        _write_outreach_send_failure(store=store, order=updated, exc=exc)
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} не отправлен: {type(exc).__name__}.")
         return updated
 
@@ -1468,11 +1503,12 @@ def _approve_outreach(
         except Exception as exc:
             updated = replace(
                 order,
-                status=OrderStatus.SEND_FAILED,
+                status=_outreach_failure_status(exc),
                 latest_approved_outreach=outreach_text,
                 updated_at=format_moscow_time(),
             )
             store.save_order(updated)
+            _write_outreach_send_failure(store=store, order=updated, exc=exc)
             answer(f"Отклик не отправлен: {type(exc).__name__}.")
             return updated
         updated = replace(
