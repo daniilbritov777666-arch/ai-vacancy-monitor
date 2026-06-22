@@ -11,6 +11,7 @@
 - В ручном режиме подходящие заказы отправляются в Telegram с кнопками подтверждения; в `autopilot` безопасные заказы проходят без кнопок.
 - Локальный агент создает отдельную папку заказа в `orders/`.
 - AI-слой может подготовить анализ, отклик, план, черновик результата и сообщение заказчику.
+- В `autopilot` AI-задачи проходят через транзакционную SQLite-очередь: поиск не блокируется внешним API, временные ошибки повторяются, а просроченные lease восстанавливаются после перезапуска.
 - Если заказ пришел с Freelancehunt и задан `FREELANCEHUNT_API_TOKEN`, автопилот отправляет первый безопасный отклик через официальный API Freelancehunt.
 - Если в публичном проекте указан email и настроен SMTP, автопилот отправляет первый отклик по email. Без доступного контакта заказ получает `contact_unavailable`.
 - Если включен `AUTO_CONVERSATION_ENABLED`, локальный агент читает входящие треды Freelancehunt, сохраняет переписку в папку заказа, готовит AI-черновик ответа и уведомляет Telegram.
@@ -112,6 +113,11 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `OPENAI_MODEL` - модель OpenAI. По умолчанию `gpt-4.1-mini`.
 - `OPENAI_BASE_URL` - базовый URL OpenAI-compatible API. По умолчанию `https://api.openai.com/v1`.
 - `AUTO_MAX_PRICE_RUB` - максимальная цена, при которой `autopilot` может сам продвинуть заказ до черновика. По умолчанию `15000`.
+- `AGENT_QUEUE_ENABLED` - включает устойчивую очередь AI-задач. По умолчанию включено при `AUTO_MODE=autopilot`.
+- `AGENT_QUEUE_PATH` - путь к SQLite-файлу очереди. По умолчанию `orders/agent_jobs.sqlite3`.
+- `AGENT_JOBS_PER_CYCLE` - максимум фоновых задач за один проход. По умолчанию `3`, диапазон `1..20`.
+- `AGENT_JOB_MAX_ATTEMPTS` - максимум попыток задачи. По умолчанию `4`, диапазон `1..8`.
+- `AGENT_JOB_LEASE_SECONDS` - время аренды задачи worker-процессом. По умолчанию `600`, диапазон `30..3600`.
 - `AUTO_OUTREACH_ENABLED` - разрешает агенту самому отправлять первый безопасный отклик через API Freelancehunt или на опубликованный email после AI-проверки. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_OUTREACH_DAILY_LIMIT` - дневной лимит автооткликов. По умолчанию `3`.
 - `AUTO_OUTREACH_MAX_AGE_HOURS` - максимальный возраст проекта для автоотклика. По умолчанию `24` часа.
@@ -161,6 +167,10 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `reports/freelancehunt_live_api_audit.json` - последний live-аудит `threads`/`my/bids` Freelancehunt.
 - `reports/status_report.md` - последний Telegram-отчет состояния агента.
 - `reports/public_sources_health.json` - результат последней проверки Freelance.ru, Pchel.net, Kwork и Workzilla.
+- `jobs/<job_id>.json` - безопасный журнал всех попыток фоновой задачи заказа.
+- `jobs/dead.json` - окончательная ошибка фоновой задачи после исчерпания повторов.
+- `orders/agent_jobs.sqlite3` - транзакционное планирование и lease; клиентские материалы и тексты заказов остаются в `state.json` и папках заказа.
+- `reports/job_queue_health.json` - количества pending/leased/succeeded/dead и восстановленные lease.
 
 Проверка готовности бирж, переписки и платежей:
 

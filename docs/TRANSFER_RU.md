@@ -51,6 +51,11 @@
 - `AUTO_REVISION_DAILY_LIMIT=5` - дневной лимит автоматических правок.
 - `AUTO_STATUS_REPORT_ENABLED=true` - агент отправляет Telegram-отчет состояния с live-аудитом API Freelancehunt.
 - `AUTO_STATUS_REPORT_INTERVAL_MINUTES=360` - минимальный интервал между отчетами.
+- `AGENT_QUEUE_ENABLED=true` - AI-анализ заказов выполняется через устойчивую SQLite-очередь.
+- `AGENT_QUEUE_PATH=orders/agent_jobs.sqlite3` - runtime-БД планирования; не содержит клиентские файлы и не заменяет `state.json`.
+- `AGENT_JOBS_PER_CYCLE=3` - ограничение задач за проход.
+- `AGENT_JOB_MAX_ATTEMPTS=4` - максимум попыток с задержками 1, 5 и 15 минут.
+- `AGENT_JOB_LEASE_SECONDS=600` - lease автоматически восстанавливается после аварийного завершения процесса.
 - В `autopilot` непрошедший quality gate не создает карточку согласования: отправка блокируется, а Telegram получает информационное уведомление.
 
 AI-слой пишет:
@@ -80,6 +85,8 @@ AI-слой пишет:
 - `orders/reports/freelancehunt_live_api_audit.json`.
 - `orders/reports/status_report.md`.
 - `orders/reports/public_sources_health.json`.
+- `orders/agent_jobs.sqlite3`.
+- `orders/<order_id>/jobs/<job_id>.json` и `orders/<order_id>/jobs/dead.json`.
 
 Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher статуса - через `AUTO_PAYMENT_WATCH_ENABLED=true`, Telegram-отчет - через `AUTO_STATUS_REPORT_ENABLED=true`. В `autopilot` рискованные и неопределенные заказы автоматически получают статус `skipped`, а заказ без рабочего канала связи - `contact_unavailable`, без запроса ручного подтверждения. Полный цикл после первого email-отклика невозможен без двустороннего почтового входящего канала; закрытие заказа на Freelancehunt выполняется только для победившей ставки при финальном статусе проекта из API. Фактическое поступление денег проверяется на балансе биржи.
 
