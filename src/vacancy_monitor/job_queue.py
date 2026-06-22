@@ -193,6 +193,14 @@ class AgentJobQueue:
             ).fetchall()
         return {row["status"]: row["count"] for row in rows}
 
+    def oldest_pending_at(self) -> datetime | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT MIN(created_at) AS created_at FROM jobs WHERE status = ?",
+                (JobStatus.PENDING.value,),
+            ).fetchone()
+        return _parse_time(row["created_at"]) if row else None
+
     def _finish(
         self,
         job_id: str,

@@ -57,6 +57,11 @@ class Config:
     smtp_password: str = ""
     smtp_from: str | None = None
     smtp_use_ssl: bool = False
+    agent_queue_enabled: bool = False
+    agent_queue_path: Path | None = None
+    agent_jobs_per_cycle: int = 3
+    agent_job_max_attempts: int = 4
+    agent_job_lease_seconds: int = 600
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -101,6 +106,11 @@ class Config:
         auto_revision_daily_limit = int(os.environ.get("AUTO_REVISION_DAILY_LIMIT", "5"))
         auto_status_report_enabled = _env_bool("AUTO_STATUS_REPORT_ENABLED", default=autonomous_default)
         auto_status_report_interval_minutes = int(os.environ.get("AUTO_STATUS_REPORT_INTERVAL_MINUTES", "360"))
+        agent_queue_enabled = _env_bool("AGENT_QUEUE_ENABLED", default=autonomous_default)
+        agent_queue_path = Path(os.environ.get("AGENT_QUEUE_PATH", str(orders_path / "agent_jobs.sqlite3")))
+        agent_jobs_per_cycle = min(20, max(1, int(os.environ.get("AGENT_JOBS_PER_CYCLE", "3"))))
+        agent_job_max_attempts = min(8, max(1, int(os.environ.get("AGENT_JOB_MAX_ATTEMPTS", "4"))))
+        agent_job_lease_seconds = min(3600, max(30, int(os.environ.get("AGENT_JOB_LEASE_SECONDS", "600"))))
 
         if not bot_token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
@@ -152,6 +162,11 @@ class Config:
             smtp_password=smtp_password,
             smtp_from=smtp_from,
             smtp_use_ssl=smtp_use_ssl,
+            agent_queue_enabled=agent_queue_enabled,
+            agent_queue_path=agent_queue_path,
+            agent_jobs_per_cycle=agent_jobs_per_cycle,
+            agent_job_max_attempts=agent_job_max_attempts,
+            agent_job_lease_seconds=agent_job_lease_seconds,
         )
 
 

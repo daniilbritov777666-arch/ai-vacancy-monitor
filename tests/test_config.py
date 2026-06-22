@@ -77,6 +77,11 @@ def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
     assert config.auto_payment_watch_enabled is True
     assert config.auto_revision_enabled is True
     assert config.auto_status_report_enabled is True
+    assert config.agent_queue_enabled is True
+    assert config.agent_queue_path == config.orders_path / "agent_jobs.sqlite3"
+    assert config.agent_jobs_per_cycle == 3
+    assert config.agent_job_max_attempts == 4
+    assert config.agent_job_lease_seconds == 600
 
 
 def test_autopilot_mode_allows_explicit_autonomous_flag_override(monkeypatch):
@@ -86,6 +91,7 @@ def test_autopilot_mode_allows_explicit_autonomous_flag_override(monkeypatch):
     monkeypatch.setenv("AUTO_DELIVERY_ENABLED", "false")
     monkeypatch.setenv("AUTO_REVISION_ENABLED", "false")
     monkeypatch.setenv("AUTO_STATUS_REPORT_ENABLED", "false")
+    monkeypatch.setenv("AGENT_QUEUE_ENABLED", "false")
 
     config = Config.from_env()
 
@@ -93,6 +99,24 @@ def test_autopilot_mode_allows_explicit_autonomous_flag_override(monkeypatch):
     assert config.auto_delivery_enabled is False
     assert config.auto_revision_enabled is False
     assert config.auto_status_report_enabled is False
+    assert config.agent_queue_enabled is False
+
+
+def test_agent_queue_config_reads_and_bounds_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("ORDERS_PATH", str(tmp_path / "orders"))
+    monkeypatch.setenv("AGENT_QUEUE_PATH", str(tmp_path / "custom.sqlite3"))
+    monkeypatch.setenv("AGENT_JOBS_PER_CYCLE", "99")
+    monkeypatch.setenv("AGENT_JOB_MAX_ATTEMPTS", "20")
+    monkeypatch.setenv("AGENT_JOB_LEASE_SECONDS", "5")
+
+    config = Config.from_env()
+
+    assert config.agent_queue_path == tmp_path / "custom.sqlite3"
+    assert config.agent_jobs_per_cycle == 20
+    assert config.agent_job_max_attempts == 8
+    assert config.agent_job_lease_seconds == 30
 
 
 def test_freelancehunt_config_reads_env(monkeypatch):
