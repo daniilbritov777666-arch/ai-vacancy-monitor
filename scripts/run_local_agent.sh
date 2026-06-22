@@ -4,7 +4,14 @@ set -u
 PROJECT_DIR="${PROJECT_DIR:-/Users/daniilbritov/Documents/Даня_Vibe_Code}"
 cd "$PROJECT_DIR" || exit 78
 
-export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+
+if command -v limactl >/dev/null 2>&1; then
+  if ! limactl list freelance-agent --format '{{.Status}}' 2>/dev/null | grep -q Running; then
+    limactl start freelance-agent >/dev/null
+  fi
+  export DOCKER_HOST="unix://$HOME/.lima/freelance-agent/sock/docker.sock"
+fi
 
 export TELEGRAM_BOT_TOKEN="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.telegram-token -w 2>/dev/null || true)"
 export OPENAI_API_KEY="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.openai-api-key -w 2>/dev/null || true)"

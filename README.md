@@ -130,6 +130,9 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AUTO_DELIVERY_DAILY_LIMIT` - дневной лимит автосдачи результатов. По умолчанию `5`.
 - `AUTO_QUALITY_ENABLED` - включает локальную и AI-проверку файлов перед первоначальной сдачей и отправкой правок. По умолчанию включено при `AUTO_MODE=autopilot`.
 - `AUTO_QUALITY_MAX_REPAIRS` - максимальное число автоматических исправлений после замечаний. По умолчанию `2`, допустимый диапазон `0..5`.
+- `EXECUTION_VERIFY_ENABLED` - запускает Python/JavaScript-пакеты в одноразовом контейнере перед AI-review и отправкой. В `autopilot` включено по умолчанию.
+- `EXECUTION_TIMEOUT_SECONDS`, `EXECUTION_MEMORY_MB`, `EXECUTION_CPUS`, `EXECUTION_MAX_OUTPUT_BYTES` - лимиты изолированного запуска. По умолчанию `120`, `512`, `1.0`, `65536`.
+- Установка runtime: `./scripts/setup_execution_runtime.sh`. Скрипт использует Homebrew/Colima или user-local Lima без admin-прав. Контейнер работает без сети, с read-only пакетом и без секретов агента.
 - `AUTO_PAYMENT_WATCH_ENABLED` - проверяет собственные ставки через `/v2/my/bids`, распознает выбранного исполнителя и закрывает локальный заказ после финального статуса проекта. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REVISION_ENABLED` - разрешает агенту самому обрабатывать безопасные правки после сдачи результата. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REVISION_DAILY_LIMIT` - дневной лимит автоматических правок. По умолчанию `5`.
@@ -158,6 +161,8 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `outbox/delivery_message.md` - сообщение заказчику для сдачи результата.
 - `outbox/delivery_approval_requested.json` - отметка, что карточка проверки результата уже отправлена в Telegram.
 - `outbox/delivery_message.sent.json` - отметка, что результат отправлен заказчику автоматически или после кнопки `Разрешить отправку`.
+- `quality/execution-verification-attempt-<номер>.json` и `quality/execution-verification-latest.json` - отчеты контейнерной проверки.
+- `orders/reports/execution_runtime_health.json` - доступность Docker daemon и runtime-образов.
 - `quality/attempt-<номер>.json` - отчет локальной и AI-проверки для одной попытки.
 - `quality/latest.json` - последний вердикт качества.
 - `quality/quality_failed.json` - окончательная блокировка после исчерпания автоматических исправлений.

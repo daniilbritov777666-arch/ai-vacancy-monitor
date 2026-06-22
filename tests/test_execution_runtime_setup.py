@@ -18,6 +18,9 @@ def test_setup_script_has_safe_idempotent_contract():
     assert "docker image inspect" in text
     assert "docker system prune" not in text
     assert "--privileged" not in text
+    assert "lima-vm/lima/releases/download" in text
+    assert "download.docker.com/mac/static/stable/aarch64" in text
+    assert 'DOCKER_HOST="unix://$HOME/.lima/freelance-agent/sock/docker.sock"' in text
 
 
 def test_python_runner_pins_pytest_and_uses_unprivileged_user():
@@ -30,4 +33,6 @@ def test_python_runner_pins_pytest_and_uses_unprivileged_user():
 
 def test_launch_agent_runner_exposes_homebrew_tools():
     text = (ROOT / "scripts" / "run_local_agent.sh").read_text(encoding="utf-8")
-    assert 'export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"' in text
+    assert 'export PATH="$HOME/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"' in text
+    assert "limactl start freelance-agent" in text
+    assert 'DOCKER_HOST="unix://$HOME/.lima/freelance-agent/sock/docker.sock"' in text

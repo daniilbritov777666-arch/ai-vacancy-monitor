@@ -46,6 +46,7 @@
 - `AUTO_DELIVERY_DAILY_LIMIT=5` - дневной лимит автосдачи результатов.
 - `AUTO_QUALITY_ENABLED=true` - локальная и AI-проверка первоначального результата и автоправок до отправки.
 - `AUTO_QUALITY_MAX_REPAIRS=2` - две автоматические попытки исправить замечания; затем `quality_failed` без ручного согласования.
+- `EXECUTION_VERIFY_ENABLED=true` - обязательная изолированная проверка Python/JavaScript-файлов без сети и без записи в пакет.
 - `AUTO_PAYMENT_WATCH_ENABLED=true` - агент проверяет `/v2/my/bids`, распознает победившую ставку и финальный статус проекта.
 - `AUTO_REVISION_ENABLED=true` - агент сам обрабатывает безопасные правки после сдачи результата.
 - `AUTO_REVISION_DAILY_LIMIT=5` - дневной лимит автоматических правок.
@@ -79,12 +80,15 @@ AI-слой пишет:
 - `orders/<order_id>/quality/attempt-<номер>.json`.
 - `orders/<order_id>/quality/latest.json`.
 - `orders/<order_id>/quality/quality_failed.json`.
+- `orders/<order_id>/quality/execution-verification-attempt-<номер>.json`.
+- `orders/<order_id>/quality/execution-verification-latest.json`.
 - `orders/<order_id>/payment/freelancehunt_bid.json`.
 - `orders/<order_id>/revisions/<revision_id>/`.
 - `orders/<order_id>/revisions/manual_review_required.json`.
 - `orders/reports/freelancehunt_live_api_audit.json`.
 - `orders/reports/status_report.md`.
 - `orders/reports/public_sources_health.json`.
+- `orders/reports/execution_runtime_health.json`.
 - `orders/agent_jobs.sqlite3`.
 - `orders/<order_id>/jobs/<job_id>.json` и `orders/<order_id>/jobs/dead.json`.
 
@@ -99,14 +103,20 @@ AI-слой пишет:
 python3 -m pip install -r requirements-dev.txt
 ```
 
-3. Положить секреты в Keychain:
+3. Установить контейнерный runtime. Без admin-прав скрипт сам установит Lima и Docker CLI в `~/.local`:
+
+```bash
+./scripts/setup_execution_runtime.sh
+```
+
+4. Положить секреты в Keychain:
 
 ```bash
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.telegram-token -w "TELEGRAM_TOKEN"
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.openai-api-key -w "OPENAI_API_KEY"
 ```
 
-4. Проверить вручную:
+5. Проверить вручную:
 
 ```bash
 export TELEGRAM_BOT_TOKEN="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.telegram-token -w)"
@@ -114,13 +124,13 @@ export OPENAI_API_KEY="$(security find-generic-password -a vacancy-agent -s com.
 TELEGRAM_CHAT_ID=150761046 AUTO_MODE=autopilot PYTHONPATH=src python3 -m vacancy_monitor.local_agent_cli
 ```
 
-5. Для постоянного запуска скопировать `deploy/macos/com.codex.vacancy-agent.plist.example` в:
+6. Для постоянного запуска скопировать `deploy/macos/com.codex.vacancy-agent.plist.example` в:
 
 ```bash
 ~/Library/LaunchAgents/com.codex.vacancy-agent.plist
 ```
 
-6. В plist заменить `/ABSOLUTE/ASCII/PATH/TO/freelance-agent` на реальный путь к папке проекта или на ASCII-symlink. Если реальная папка содержит кириллицу, создай symlink:
+7. В plist заменить `/ABSOLUTE/ASCII/PATH/TO/freelance-agent` на реальный путь к папке проекта или на ASCII-symlink. Если реальная папка содержит кириллицу, создай symlink:
 
 ```bash
 ln -sfn "/путь/к/проекту/с/кириллицей" "$HOME/.codex/vibe-code-project"
@@ -128,19 +138,19 @@ ln -sfn "/путь/к/проекту/с/кириллицей" "$HOME/.codex/vibe
 
 И используй `$HOME/.codex/vibe-code-project` в plist.
 
-7. Указать ASCII-папку логов, например:
+8. Указать ASCII-папку логов, например:
 
 ```bash
 mkdir -p "$HOME/.codex/vacancy-agent-logs"
 ```
 
-8. Убедиться, что скрипт исполняемый:
+9. Убедиться, что скрипт исполняемый:
 
 ```bash
 chmod +x scripts/run_local_agent.sh
 ```
 
-9. Запустить:
+10. Запустить:
 
 ```bash
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.codex.vacancy-agent.plist
