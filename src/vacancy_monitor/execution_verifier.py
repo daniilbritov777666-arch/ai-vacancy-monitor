@@ -87,7 +87,7 @@ class DockerExecutionVerifier:
         memory_mb: int = 512,
         cpus: float = 1.0,
         max_output_bytes: int = 65536,
-        runner: Runner = subprocess.run,
+        runner: Runner | None = None,
     ) -> None:
         self.python_image = python_image
         self.node_image = node_image
@@ -95,7 +95,7 @@ class DockerExecutionVerifier:
         self.memory_mb = memory_mb
         self.cpus = cpus
         self.max_output_bytes = max_output_bytes
-        self.runner = runner
+        self.runner = runner or self._run_subprocess
 
     def verify(self, generated_dir: Path) -> ExecutionVerificationReport:
         started = datetime.now(tz=UTC)
@@ -179,6 +179,16 @@ class DockerExecutionVerifier:
 
     def _run(self, argv: list[str]) -> subprocess.CompletedProcess:
         return self.runner(argv, timeout=self.timeout_seconds)
+
+    @staticmethod
+    def _run_subprocess(argv: list[str], *, timeout: int) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            argv,
+            timeout=timeout,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
     def _truncate(self, value: str) -> str:
         return value.encode("utf-8")[: self.max_output_bytes].decode("utf-8", errors="replace")

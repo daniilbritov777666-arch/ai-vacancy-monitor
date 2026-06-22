@@ -4,6 +4,8 @@ set -u
 PROJECT_DIR="${PROJECT_DIR:-/Users/daniilbritov/Documents/Даня_Vibe_Code}"
 cd "$PROJECT_DIR" || exit 78
 
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+
 export TELEGRAM_BOT_TOKEN="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.telegram-token -w 2>/dev/null || true)"
 export OPENAI_API_KEY="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.openai-api-key -w 2>/dev/null || true)"
 export FREELANCEHUNT_API_TOKEN="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.freelancehunt-token -w 2>/dev/null || true)"

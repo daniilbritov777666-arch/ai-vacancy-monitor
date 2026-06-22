@@ -26,6 +26,8 @@ from vacancy_monitor.execution import (
     replace_execution_draft_package,
     write_execution_draft_package,
 )
+from vacancy_monitor.execution_verifier import DockerExecutionVerifier, VerificationStatus
+from vacancy_monitor.execution_runtime import write_execution_runtime_health
 from vacancy_monitor.email_outreach import SMTPOutreachClient
 from vacancy_monitor.freelancehunt import (
     FreelancehuntBid,
@@ -136,6 +138,12 @@ def run_local_agent_once(
     process_jobs: bool = True,
 ) -> MonitorSummary:
     store = OrderStore(config.orders_path)
+    if config.execution_verify_enabled:
+        write_execution_runtime_health(
+            path=config.orders_path / "reports" / "execution_runtime_health.json",
+            python_image=config.execution_python_image,
+            node_image=config.execution_node_image,
+        )
     queue = None
     recovered_leases = 0
     queue_enabled = bool(config.agent_queue_enabled and config.auto_mode != "off" and config.openai_api_key)
@@ -1235,7 +1243,20 @@ def _run_delivery_quality_gate(
         )
         ai_review: AIQualityReview | None = None
         ai_error: str | None = None
-        if local_report.passed and quality_client is not None:
+        execution_report = None
+        if local_report.passed and config.execution_verify_enabled:
+            verifier = DockerExecutionVerifier(
+                python_image=config.execution_python_image,
+                node_image=config.execution_node_image,
+                timeout_seconds=config.execution_timeout_seconds,
+                memory_mb=config.execution_memory_mb,
+                cpus=config.execution_cpus,
+                max_output_bytes=config.execution_max_output_bytes,
+            )
+            execution_report = verifier.verify(store.order_dir(order.order_id) / "execution" / "generated")
+            _write_execution_verification(store=store, order=order, attempt=attempt, report=execution_report)
+        execution_passed = execution_report is None or execution_report.status == VerificationStatus.PASSED
+        if local_report.passed and execution_passed and quality_client is not None:
             try:
                 ai_review = quality_client.review_execution_package(order, conversation_text, package)
             except Exception as exc:
@@ -1243,12 +1264,13 @@ def _run_delivery_quality_gate(
         elif quality_client is None:
             ai_error = "quality_client_unavailable"
 
-        passed = local_report.passed and ai_review is not None and ai_review.passed
+        passed = local_report.passed and execution_passed and ai_review is not None and ai_review.passed
         report_data = {
             "attempt": attempt,
             "checked_at": format_moscow_time(),
             "passed": passed,
             "local": local_report.to_dict(),
+            "execution_verification": execution_report.to_dict() if execution_report is not None else None,
             "ai": (
                 {
                     "passed": ai_review.passed,
@@ -1263,6 +1285,21 @@ def _run_delivery_quality_gate(
         _write_quality_json(quality_dir / "latest.json", report_data)
         if passed:
             return True
+
+        if execution_report is not None and execution_report.status in {
+            VerificationStatus.RUNTIME_UNAVAILABLE,
+            VerificationStatus.UNSUPPORTED,
+        }:
+            failed = store.update_status(order.order_id, OrderStatus.QUALITY_FAILED)
+            _write_quality_json(
+                quality_dir / "quality_failed.json",
+                {"failed_at": format_moscow_time(), "attempts": attempt, "last_report": report_data},
+            )
+            _safe_notify(
+                sender,
+                f"Автопроверка выполнения заказа {failed.order_id} заблокирована: {execution_report.status.value}.",
+            )
+            return False
 
         if attempt > config.auto_quality_max_repairs:
             failed = store.update_status(order.order_id, OrderStatus.QUALITY_FAILED)
@@ -1287,6 +1324,8 @@ def _run_delivery_quality_gate(
             return False
 
         instructions = [issue.message for issue in local_report.issues]
+        if execution_report is not None:
+            instructions.extend(issue.message for issue in execution_report.issues)
         if ai_review is not None:
             instructions.extend(ai_review.issues)
             if ai_review.repair_instructions_ru:
@@ -1309,6 +1348,18 @@ def _run_delivery_quality_gate(
             _write_quality_json(quality_dir / "latest.json", report_data)
 
     return False
+
+
+def _write_execution_verification(*, store: OrderStore, order: Order, attempt: int, report) -> None:
+    directory = store.order_dir(order.order_id) / "execution" / "verification"
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = report.to_dict()
+    _write_quality_json(directory / f"attempt-{attempt:03d}.json", payload)
+    _write_quality_json(directory / "latest.json", payload)
+    stdout = "\n".join(command.stdout for command in report.commands if command.stdout)
+    stderr = "\n".join(command.stderr for command in report.commands if command.stderr)
+    (directory / f"stdout-{attempt:03d}.log").write_text(stdout, encoding="utf-8")
+    (directory / f"stderr-{attempt:03d}.log").write_text(stderr, encoding="utf-8")
 
 
 def _write_quality_json(path, payload: dict) -> None:

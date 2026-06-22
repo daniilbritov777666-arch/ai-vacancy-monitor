@@ -4,10 +4,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
+import vacancy_monitor.local_agent_cli as local_agent_cli
 
 from vacancy_monitor.autopilot import AutopilotResult
 from vacancy_monitor.config import Config
 from vacancy_monitor.execution import ExecutionDraftPackage
+from vacancy_monitor.execution_verifier import (
+    CommandResult,
+    ExecutionVerificationReport,
+    ProjectType,
+    VerificationIssue,
+    VerificationStatus,
+)
 from vacancy_monitor.freelancehunt import FreelancehuntMyBid, FreelancehuntThread, FreelancehuntThreadMessage
 from vacancy_monitor.local_agent_cli import (
     _process_agent_jobs,
@@ -66,6 +74,32 @@ def test_run_local_agent_writes_public_source_health_report(tmp_path):
         "pchel",
         "kwork",
         "workzilla",
+    ]
+
+
+def test_run_local_agent_writes_execution_runtime_health_when_enabled(tmp_path, monkeypatch):
+    config = replace(make_config(tmp_path), execution_verify_enabled=True)
+    calls = []
+    monkeypatch.setattr(
+        local_agent_cli,
+        "write_execution_runtime_health",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        fetch_public_posts=None,
+        send_message=lambda text, reply_markup=None: None,
+    )
+
+    assert calls == [
+        {
+            "path": config.orders_path / "reports" / "execution_runtime_health.json",
+            "python_image": config.execution_python_image,
+            "node_image": config.execution_node_image,
+        }
     ]
 
 
@@ -1103,6 +1137,73 @@ def test_quality_gate_sends_package_that_passes_local_and_ai_checks(tmp_path):
     assert execution_client.repair_calls == []
     assert (store.order_dir(order.order_id) / "quality" / "latest.json").exists()
     assert conversation_client.thread_messages == [("thread-1", "Отправляю готовый результат.")]
+
+
+def _verification_report(status, issues=()):
+    return ExecutionVerificationReport(
+        status=status,
+        project_type=ProjectType.PYTHON,
+        commands=(CommandResult("python_ast", 0, "ok", ""),),
+        issues=tuple(issues),
+        started_at="2026-06-22T20:00:00+00:00",
+        finished_at="2026-06-22T20:00:01+00:00",
+        duration_seconds=1.0,
+        runtime={"name": "docker", "image": "runner:test"},
+    )
+
+
+def test_quality_gate_requires_passed_container_verification(tmp_path, monkeypatch):
+    conversation_client = FakeFreelancehuntConversationClient()
+    execution_client = FakeQualityExecutionClient(
+        initial_files={"bot.py": "print('ready')\n", "README.md": "# Запуск\n"}
+    )
+    config, store, order = _quality_delivery_setup(tmp_path)
+    config = replace(config, execution_verify_enabled=True)
+    monkeypatch.setattr(
+        "vacancy_monitor.local_agent_cli.DockerExecutionVerifier",
+        lambda **kwargs: type("Verifier", (), {"verify": lambda self, path: _verification_report(VerificationStatus.PASSED)})(),
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    latest = json.loads((store.order_dir(order.order_id) / "quality" / "latest.json").read_text())
+    assert latest["execution_verification"]["status"] == "passed"
+    assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
+
+
+def test_quality_gate_blocks_runtime_unavailable_without_repair(tmp_path, monkeypatch):
+    execution_client = FakeQualityExecutionClient(
+        initial_files={"bot.py": "print('ready')\n", "README.md": "# Запуск\n"}
+    )
+    config, store, order = _quality_delivery_setup(tmp_path)
+    config = replace(config, execution_verify_enabled=True)
+    report = _verification_report(
+        VerificationStatus.RUNTIME_UNAVAILABLE,
+        (VerificationIssue("runtime_unavailable", "Docker недоступен."),),
+    )
+    monkeypatch.setattr(
+        "vacancy_monitor.local_agent_cli.DockerExecutionVerifier",
+        lambda **kwargs: type("Verifier", (), {"verify": lambda self, path: report})(),
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        freelancehunt_client=FakeFreelancehuntConversationClient(),
+        execution_draft_client=execution_client,
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.QUALITY_FAILED
+    assert execution_client.repair_calls == []
 
 
 def test_quality_gate_repairs_local_failure_then_sends(tmp_path):
