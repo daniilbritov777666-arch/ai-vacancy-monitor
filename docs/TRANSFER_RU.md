@@ -38,8 +38,9 @@
 - `PUBLIC_PROJECT_SOURCES=freelance_ru,pchel` - включает дополнительные живые страницы разовых проектов.
 - `PUBLIC_SOURCE_PROBES=kwork,workzilla` - проверяет доступность площадок без импорта демонстрационных заданий.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_SSL` - канал первого email-отклика; если он не настроен, мониторинг источников все равно работает.
-- `AUTO_CONVERSATION_ENABLED=true` - агент читает входящие треды Freelancehunt, сохраняет переписку, готовит AI-черновик ответа и уведомляет Telegram.
-- `AUTO_REPLY_ENABLED=true` - агент сам отправляет безопасные последующие ответы в тред Freelancehunt.
+- `IMAP_HOST`, `IMAP_PORT`, `IMAP_USERNAME`, `IMAP_PASSWORD`, `IMAP_FOLDER`, `IMAP_USE_SSL` - входящие email-ответы заказчиков; без IMAP email-канал работает только на первый отклик.
+- `AUTO_CONVERSATION_ENABLED=true` - агент читает входящие треды Freelancehunt и email-ответы заказчиков, сохраняет переписку, готовит AI-черновик ответа и уведомляет Telegram.
+- `AUTO_REPLY_ENABLED=true` - агент сам отправляет безопасные последующие ответы в тред Freelancehunt или по email.
 - `AUTO_EXECUTION_ENABLED=true` - агент создает рабочий пакет выполнения и стартовые артефакты результата после ответа заказчика.
 - `AUTO_EXECUTION_DRAFT_ENABLED=true` - агент генерирует AI-пакет результата в `execution/generated/` и сообщение сдачи в `outbox/delivery_message.md`.
 - `AUTO_DELIVERY_ENABLED=true` - агент сам отправляет безопасный результат заказчику после генерации AI-пакета и переводит заказ в `payment_requested`.
@@ -94,7 +95,7 @@ AI-слой пишет:
 - `orders/agent_jobs.sqlite3`.
 - `orders/<order_id>/jobs/<job_id>.json` и `orders/<order_id>/jobs/dead.json`.
 
-Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher статуса - через `AUTO_PAYMENT_WATCH_ENABLED=true`, Telegram-отчет - через `AUTO_STATUS_REPORT_ENABLED=true`. В `autopilot` рискованные и неопределенные заказы автоматически получают статус `skipped`, а заказ без рабочего канала связи - `contact_unavailable`, без запроса ручного подтверждения. Полный цикл после первого email-отклика невозможен без двустороннего почтового входящего канала; закрытие заказа на Freelancehunt выполняется только для победившей ставки при финальном статусе проекта из API. Фактическое поступление денег проверяется на балансе биржи.
+Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher статуса - через `AUTO_PAYMENT_WATCH_ENABLED=true`, Telegram-отчет - через `AUTO_STATUS_REPORT_ENABLED=true`. В `autopilot` рискованные и неопределенные заказы автоматически получают статус `skipped`, а заказ без рабочего канала связи - `contact_unavailable`, без запроса ручного подтверждения. Полный email-цикл требует SMTP для отправки и IMAP для входящих ответов; закрытие заказа на Freelancehunt выполняется только для победившей ставки при финальном статусе проекта из API. Фактическое поступление денег проверяется на балансе биржи.
 
 После запуска смотри `orders/reports/marketplace_autopilot_plan.md`: там агент сам отмечает, какие биржи готовы к полному автопилоту, какие работают только как источники поиска, какие блокируются отсутствием API/SMTP, и какие РФ-платежные каналы доступны.
 
@@ -118,6 +119,14 @@ python3 -m pip install -r requirements-dev.txt
 ```bash
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.telegram-token -w "TELEGRAM_TOKEN"
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.openai-api-key -w "OPENAI_API_KEY"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.smtp-host -w "smtp.example.ru"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.smtp-username -w "robot@example.ru"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.smtp-password -w "SMTP_PASSWORD"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.smtp-from -w "robot@example.ru"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.imap-host -w "imap.example.ru"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.imap-username -w "robot@example.ru"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.imap-password -w "IMAP_PASSWORD"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.imap-folder -w "INBOX"
 ```
 
 5. Проверить вручную:

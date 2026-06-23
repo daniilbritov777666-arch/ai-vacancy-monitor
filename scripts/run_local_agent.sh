@@ -18,5 +18,13 @@ export OPENAI_API_KEY="$(security find-generic-password -a vacancy-agent -s com.
 export FREELANCEHUNT_API_TOKEN="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.freelancehunt-token -w 2>/dev/null || true)"
 export YOOKASSA_SHOP_ID="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.yookassa-shop-id -w 2>/dev/null || true)"
 export YOOKASSA_SECRET_KEY="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.yookassa-secret-key -w 2>/dev/null || true)"
+export SMTP_HOST="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.smtp-host -w 2>/dev/null || true)"
+export SMTP_USERNAME="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.smtp-username -w 2>/dev/null || true)"
+export SMTP_PASSWORD="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.smtp-password -w 2>/dev/null || true)"
+export SMTP_FROM="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.smtp-from -w 2>/dev/null || true)"
+export IMAP_HOST="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.imap-host -w 2>/dev/null || true)"
+export IMAP_USERNAME="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.imap-username -w 2>/dev/null || true)"
+export IMAP_PASSWORD="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.imap-password -w 2>/dev/null || true)"
+export IMAP_FOLDER="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.imap-folder -w 2>/dev/null || true)"
 
 exec /usr/bin/env PYTHONPATH=src /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 -m vacancy_monitor.local_agent_cli

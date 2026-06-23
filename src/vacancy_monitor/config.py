@@ -57,6 +57,12 @@ class Config:
     smtp_password: str = ""
     smtp_from: str | None = None
     smtp_use_ssl: bool = False
+    imap_host: str | None = None
+    imap_port: int = 993
+    imap_username: str = ""
+    imap_password: str = ""
+    imap_folder: str = "INBOX"
+    imap_use_ssl: bool = True
     agent_queue_enabled: bool = False
     agent_queue_path: Path | None = None
     agent_jobs_per_cycle: int = 3
@@ -85,6 +91,12 @@ class Config:
         smtp_password = os.environ.get("SMTP_PASSWORD", "")
         smtp_from = os.environ.get("SMTP_FROM", "").strip() or None
         smtp_use_ssl = _env_bool("SMTP_USE_SSL")
+        imap_host = os.environ.get("IMAP_HOST", "").strip() or None
+        imap_port = int(os.environ.get("IMAP_PORT", "993"))
+        imap_username = os.environ.get("IMAP_USERNAME", "").strip()
+        imap_password = os.environ.get("IMAP_PASSWORD", "")
+        imap_folder = os.environ.get("IMAP_FOLDER", "INBOX").strip() or "INBOX"
+        imap_use_ssl = _env_bool("IMAP_USE_SSL", default=True)
         state_path = Path(os.environ.get("STATE_PATH", "data/seen_posts.json"))
         send_first_run = os.environ.get("SEND_FIRST_RUN", "").lower() in {"1", "true", "yes"}
         orders_path = Path(os.environ.get("ORDERS_PATH", "orders"))
@@ -178,6 +190,12 @@ class Config:
             smtp_password=smtp_password,
             smtp_from=smtp_from,
             smtp_use_ssl=smtp_use_ssl,
+            imap_host=imap_host,
+            imap_port=imap_port,
+            imap_username=imap_username,
+            imap_password=imap_password,
+            imap_folder=imap_folder,
+            imap_use_ssl=imap_use_ssl,
             agent_queue_enabled=agent_queue_enabled,
             agent_queue_path=agent_queue_path,
             agent_jobs_per_cycle=agent_jobs_per_cycle,

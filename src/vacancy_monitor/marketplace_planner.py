@@ -177,13 +177,16 @@ def _public_email_channel(
         blockers.append(f"источник недоступен: {health.status}")
     if not (config.smtp_host and config.smtp_from):
         blockers.append("SMTP не настроен")
+    if not config.imap_host:
+        blockers.append("IMAP не настроен")
     outreach = "email_auto" if config.smtp_host and config.smtp_from else "manual_or_email_only"
+    conversation = "email_auto" if config.imap_host and config.smtp_host and config.smtp_from else "email_if_customer_replies"
     return MarketplaceChannel(
         key=key,
         name=name,
         discovery="enabled" if configured and (health is None or health.status == "available") else "blocked",
         outreach=outreach,
-        conversation="email_if_customer_replies",
+        conversation=conversation,
         payment="external_or_manual",
         priority=priority,
         posts_seen=health.posts if health else 0,
@@ -228,6 +231,8 @@ def _next_actions(
         actions.append("Довести Freelancehunt до полного цикла: API-токен, autopilot, автоотклик, переписка, payment watcher.")
     if not any(channel.outreach == "email_auto" for channel in channels):
         actions.append("Подключить SMTP, чтобы автоотклик работал для публичных проектов с опубликованным email.")
+    if not any(channel.conversation == "email_auto" for channel in channels):
+        actions.append("Подключить IMAP, чтобы агент читал ответы заказчиков по email и продолжал цикл без ручного переноса.")
     if "ЮKassa" not in rf_payment_channels and not (env.get("YOOKASSA_SHOP_ID") and env.get("YOOKASSA_SECRET_KEY")):
         actions.append("Для внешних оплат добавить YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY; первые заказы вести через безопасные сделки бирж.")
     return actions

@@ -191,6 +191,26 @@ def test_smtp_config_reads_env(monkeypatch):
     assert config.smtp_use_ssl is True
 
 
+def test_imap_config_reads_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("IMAP_HOST", "imap.example.ru")
+    monkeypatch.setenv("IMAP_PORT", "993")
+    monkeypatch.setenv("IMAP_USERNAME", "robot@example.ru")
+    monkeypatch.setenv("IMAP_PASSWORD", "secret")
+    monkeypatch.setenv("IMAP_FOLDER", "Freelance")
+    monkeypatch.setenv("IMAP_USE_SSL", "true")
+
+    config = Config.from_env()
+
+    assert config.imap_host == "imap.example.ru"
+    assert config.imap_port == 993
+    assert config.imap_username == "robot@example.ru"
+    assert config.imap_password == "secret"
+    assert config.imap_folder == "Freelance"
+    assert config.imap_use_ssl is True
+
+
 def test_conversation_config_reads_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")

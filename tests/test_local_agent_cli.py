@@ -16,6 +16,7 @@ from vacancy_monitor.execution_verifier import (
     VerificationIssue,
     VerificationStatus,
 )
+from vacancy_monitor.email_inbound import EmailInboundMessage
 from vacancy_monitor.freelancehunt import FreelancehuntMyBid, FreelancehuntThread, FreelancehuntThreadMessage
 from vacancy_monitor.local_agent_cli import (
     _process_agent_jobs,
@@ -471,6 +472,18 @@ class FailingBidFreelancehuntClient(FakeFreelancehuntConversationClient):
         error = RuntimeError("bids failed")
         error.response = type("Response", (), {"status_code": 404})()
         raise error
+
+
+class FakeEmailInboundClient:
+    def __init__(self, messages=None):
+        self.messages = messages or []
+        self.marked_seen = []
+
+    def list_unseen_messages(self):
+        return self.messages
+
+    def mark_seen(self, message_id):
+        self.marked_seen.append(message_id)
 
 
 def test_run_local_agent_creates_order_for_new_match(tmp_path):
@@ -936,6 +949,65 @@ def test_run_local_agent_auto_sends_safe_customer_thread_reply(tmp_path):
     sent_record = store.order_dir(order.order_id) / "outbox" / "freelancehunt_reply_thread-1.sent.json"
     assert sent_record.exists()
     assert any("AI-ответ отправлен заказчику" in message for message, _ in sent)
+
+
+def test_run_local_agent_auto_sends_safe_email_reply(tmp_path):
+    sent = []
+    auto_sent = []
+    email_client = FakeEmailInboundClient(
+        [
+            EmailInboundMessage(
+                message_id="msg-1@example.ru",
+                from_email="client@example.ru",
+                subject="Re: Project",
+                text="Здравствуйте, можете начать сегодня?",
+                created_at="23.06.2026 10:30 МСК",
+                raw={"uid": "101"},
+            )
+        ]
+    )
+    reply_client = FakeConversationReplyClient("Здравствуйте! Да, могу начать сегодня после уточнения доступа к таблице.")
+    config = replace(
+        make_config(tmp_path),
+        auto_conversation_enabled=True,
+        auto_reply_enabled=True,
+        openai_api_key="sk-test",
+        imap_host="imap.example.ru",
+        smtp_host="smtp.example.ru",
+        smtp_from="robot@example.ru",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelance.ru",
+        post_id="freelance_ru:3272",
+        url="https://freelance.ru/task/view/3272",
+        text="Нужен Telegram-бот для заявок. client@example.ru",
+        published_at="2026-06-20T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.OUTREACH_SENT)
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        email_inbound_client=email_client,
+        conversation_reply_client=reply_client,
+        send_outreach=lambda order, text: auto_sent.append((order.contact.value, text)),
+    )
+
+    assert email_client.marked_seen == ["msg-1@example.ru"]
+    assert auto_sent == [
+        ("client@example.ru", "Здравствуйте! Да, могу начать сегодня после уточнения доступа к таблице.")
+    ]
+    order_dir = store.order_dir(order.order_id)
+    assert (order_dir / "outbox" / "email_reply_client_example_ru.sent.json").exists()
+    assert "можете начать сегодня" in (order_dir / "conversation.md").read_text(encoding="utf-8")
+    assert store.load_order(order.order_id).status == OrderStatus.DISCOVERY
+    assert any("AI-ответ отправлен заказчику по email" in message for message, _ in sent)
 
 
 def test_run_local_agent_blocks_risky_customer_thread_reply(tmp_path):

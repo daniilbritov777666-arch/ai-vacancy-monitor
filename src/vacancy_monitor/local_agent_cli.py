@@ -28,6 +28,15 @@ from vacancy_monitor.execution import (
 )
 from vacancy_monitor.execution_verifier import DockerExecutionVerifier, VerificationStatus
 from vacancy_monitor.execution_runtime import write_execution_runtime_health
+from vacancy_monitor.email_inbound import (
+    EmailInboundMessage,
+    IMAPEmailClient,
+    build_email_notification,
+    find_order_for_email,
+    sync_email_messages_to_order,
+    write_email_reply_draft,
+    write_email_reply_sent_record,
+)
 from vacancy_monitor.email_outreach import SMTPOutreachClient
 from vacancy_monitor.freelancehunt import (
     FreelancehuntBid,
@@ -122,6 +131,14 @@ class FreelancehuntConversationClient(Protocol):
         ...
 
 
+class EmailInboundClient(Protocol):
+    def list_unseen_messages(self) -> list[EmailInboundMessage]:
+        ...
+
+    def mark_seen(self, message_id: str) -> None:
+        ...
+
+
 def run_local_agent_once(
     config: Config,
     *,
@@ -134,6 +151,7 @@ def run_local_agent_once(
     send_outreach: Callable[[Order, str], None] | None = None,
     send_delivery: Callable[[Order, str], None] | None = None,
     freelancehunt_client: FreelancehuntConversationClient | None = None,
+    email_inbound_client: EmailInboundClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
     execution_draft_client: ExecutionDraftClient | None = None,
     process_jobs: bool = True,
@@ -284,6 +302,16 @@ def run_local_agent_once(
         freelancehunt_client=freelancehunt_client,
         conversation_reply_client=conversation_reply_client,
         execution_draft_client=execution_draft_client,
+        send_delivery=send_delivery,
+    )
+    _sync_email_conversations(
+        config=config,
+        store=store,
+        sender=sender,
+        email_client=email_inbound_client,
+        conversation_reply_client=conversation_reply_client,
+        execution_draft_client=execution_draft_client,
+        send_email=outreach_sender,
         send_delivery=send_delivery,
     )
     _sync_freelancehunt_bids(
@@ -740,6 +768,181 @@ def _sync_freelancehunt_conversations(
             execution_draft_client=draft_client,
             send_delivery=send_delivery or send_thread_delivery,
         )
+
+
+def _sync_email_conversations(
+    *,
+    config: Config,
+    store: OrderStore,
+    sender: Callable[..., None],
+    email_client: EmailInboundClient | None = None,
+    conversation_reply_client: ConversationReplyClient | None = None,
+    execution_draft_client: ExecutionDraftClient | None = None,
+    send_email: Callable[[Order, str], None] | None = None,
+    send_delivery: Callable[[Order, str], None] | None = None,
+) -> None:
+    if not config.auto_conversation_enabled or not config.imap_host:
+        return
+
+    client = email_client or IMAPEmailClient(
+        host=config.imap_host,
+        port=config.imap_port,
+        username=config.imap_username,
+        password=config.imap_password,
+        folder=config.imap_folder,
+        use_ssl=config.imap_use_ssl,
+    )
+    reply_client = conversation_reply_client
+    if reply_client is None and config.openai_api_key:
+        reply_client = OpenAIResponsesClient(
+            api_key=config.openai_api_key,
+            model=config.openai_model,
+            base_url=config.openai_base_url,
+        )
+    draft_client = execution_draft_client
+    if draft_client is None and config.openai_api_key:
+        draft_client = OpenAIResponsesClient(
+            api_key=config.openai_api_key,
+            model=config.openai_model,
+            base_url=config.openai_base_url,
+        )
+
+    try:
+        messages = client.list_unseen_messages()
+    except Exception as exc:
+        _safe_notify(sender, f"Синхронизация email-переписки не выполнена: {type(exc).__name__}.")
+        return
+
+    for message in messages:
+        order = find_order_for_email(store, message)
+        if order is None:
+            continue
+        try:
+            updated_order = sync_email_messages_to_order(store=store, order=order, messages=[message])
+            client.mark_seen(message.message_id)
+        except Exception as exc:
+            _safe_notify(sender, f"Email-ответ по заказу {order.order_id} не синхронизирован: {type(exc).__name__}.")
+            continue
+        _safe_notify(sender, build_email_notification(order=updated_order, messages=[message]))
+
+        thread_messages = [message.as_thread_message()]
+        _maybe_draft_email_reply(
+            store=store,
+            order=updated_order,
+            messages=thread_messages,
+            recipient=message.from_email,
+            sender=sender,
+            reply_client=reply_client,
+            send_email=send_email,
+            config=config,
+        )
+
+        _maybe_prepare_execution_workspace(
+            config=config,
+            store=store,
+            order=updated_order,
+            sender=sender,
+            execution_draft_client=draft_client,
+            send_delivery=send_delivery or send_email,
+        )
+
+
+def _maybe_draft_email_reply(
+    *,
+    store: OrderStore,
+    order: Order,
+    messages: list[FreelancehuntThreadMessage],
+    recipient: str,
+    sender: Callable[..., None],
+    reply_client: ConversationReplyClient | None,
+    send_email: Callable[[Order, str], None] | None,
+    config: Config,
+) -> None:
+    if reply_client is None or not any((not message.is_own) and message.text for message in messages):
+        return
+    try:
+        reply_text = reply_client.draft_thread_reply(order, messages)
+        path = write_email_reply_draft(store=store, order=order, recipient=recipient, reply_text=reply_text)
+    except Exception as exc:
+        _safe_notify(sender, f"AI-черновик email-ответа по заказу {order.order_id} не создан: {type(exc).__name__}.")
+        return
+    _safe_notify(
+        sender,
+        (
+            "AI-черновик email-ответа заказчику готов.\n\n"
+            f"ID: {order.order_id}\n"
+            f"Файл: {path.relative_to(store.order_dir(order.order_id))}\n\n"
+            f"{reply_text}"
+        ),
+    )
+    _maybe_auto_send_email_reply(
+        config=config,
+        store=store,
+        order=order,
+        messages=messages,
+        recipient=recipient,
+        reply_text=reply_text,
+        sender=sender,
+        send_email=send_email,
+    )
+
+
+def _maybe_auto_send_email_reply(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    messages: list[FreelancehuntThreadMessage],
+    recipient: str,
+    reply_text: str,
+    sender: Callable[..., None],
+    send_email: Callable[[Order, str], None] | None,
+) -> None:
+    if not config.auto_reply_enabled:
+        return
+    if send_email is None:
+        _safe_notify(
+            sender,
+            (
+                "Автоотправка email-ответа заблокирована.\n\n"
+                f"ID: {order.order_id}\n"
+                "Причина: SMTP не настроен\n\n"
+                "Черновик сохранен в outbox/."
+            ),
+        )
+        return
+    block_reason = _auto_reply_block_reason(config=config, store=store, order=order, messages=messages, reply_text=reply_text)
+    if block_reason:
+        _safe_notify(
+            sender,
+            (
+                "Автоотправка email-ответа заблокирована.\n\n"
+                f"ID: {order.order_id}\n"
+                f"Причина: {block_reason}\n\n"
+                "Черновик сохранен в outbox/."
+            ),
+        )
+        return
+    try:
+        send_email(order, reply_text)
+        write_email_reply_sent_record(
+            store=store,
+            order=order,
+            recipient=recipient,
+            reply_text=reply_text,
+            response_payload={"channel": "email", "recipient": recipient},
+        )
+    except Exception as exc:
+        _safe_notify(sender, f"AI-email ответ по заказу {order.order_id} не отправлен: {type(exc).__name__}.")
+        return
+    _safe_notify(
+        sender,
+        (
+            "AI-ответ отправлен заказчику по email.\n\n"
+            f"ID: {order.order_id}\n"
+            f"Email: {recipient}"
+        ),
+    )
 
 
 def _maybe_draft_thread_reply(
@@ -1888,7 +2091,7 @@ def run_local_agent_loop(
     )
     send_delivery = (
         (lambda order, text: _send_marketplace_delivery(config, order, text))
-        if config.freelancehunt_api_token
+        if config.freelancehunt_api_token or (config.smtp_host and config.smtp_from)
         else None
     )
     while True:
@@ -1942,6 +2145,18 @@ def _send_marketplace_outreach(config: Config, order: Order, text: str) -> None:
 def _send_marketplace_delivery(config: Config, order: Order, text: str) -> None:
     if not order.contact:
         raise RuntimeError("order has no contact")
+    if order.contact.channel == "email":
+        if not config.smtp_host or not config.smtp_from:
+            raise RuntimeError("SMTP_HOST and SMTP_FROM are required")
+        SMTPOutreachClient(
+            host=config.smtp_host,
+            port=config.smtp_port,
+            username=config.smtp_username,
+            password=config.smtp_password,
+            from_email=config.smtp_from,
+            use_ssl=config.smtp_use_ssl,
+        ).send(order, text)
+        return
     if order.contact.channel != "freelancehunt":
         raise RuntimeError(f"unsupported contact channel: {order.contact.channel}")
     if not config.freelancehunt_api_token:

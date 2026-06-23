@@ -81,6 +81,24 @@ def test_marketplace_plan_keeps_public_sources_discovery_only_without_email_send
     assert plan.ready_channels == []
 
 
+def test_marketplace_plan_marks_public_source_email_conversation_when_smtp_and_imap_are_ready(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        public_project_sources=["freelance_ru"],
+        smtp_host="smtp.example.ru",
+        smtp_from="robot@example.ru",
+        imap_host="imap.example.ru",
+    )
+
+    plan = build_marketplace_plan(config=config, public_health=[])
+
+    freelance_ru = next(channel for channel in plan.channels if channel.key == "freelance_ru")
+    assert freelance_ru.outreach == "email_auto"
+    assert freelance_ru.conversation == "email_auto"
+    assert "SMTP не настроен" not in freelance_ru.blockers
+    assert "IMAP не настроен" not in freelance_ru.blockers
+
+
 def test_marketplace_plan_reports_rf_payment_readiness(tmp_path):
     config = replace(
         make_config(tmp_path),
