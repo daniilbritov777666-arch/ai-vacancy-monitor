@@ -45,6 +45,7 @@ from vacancy_monitor.job_worker import (
     write_job_attempt,
     write_queue_health,
 )
+from vacancy_monitor.marketplace_planner import build_marketplace_plan, write_marketplace_plan_report
 from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.public_sources import (
@@ -187,6 +188,9 @@ def run_local_agent_once(
             config.orders_path / "reports" / "public_sources_health.json",
             public_health,
         )
+    if _should_write_marketplace_plan(config):
+        marketplace_plan = build_marketplace_plan(config=config, public_health=public_health)
+        write_marketplace_plan_report(config.orders_path / "reports", marketplace_plan)
 
     def tracked_public_fetch(source: str) -> list[Post]:
         if source in public_errors:
@@ -305,6 +309,15 @@ def _enqueue_advance_order(*, config: Config, queue: AgentJobQueue, order: Order
         idempotency_key=f"advance_order:{order.order_id}",
         max_attempts=config.agent_job_max_attempts,
         now=datetime.now(tz=UTC),
+    )
+
+
+def _should_write_marketplace_plan(config: Config) -> bool:
+    return (
+        config.auto_mode != "off"
+        or bool(config.public_project_sources)
+        or bool(config.public_source_probes)
+        or config.orders_path.exists()
     )
 
 

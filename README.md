@@ -172,6 +172,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `reports/freelancehunt_live_api_audit.json` - последний live-аудит `threads`/`my/bids` Freelancehunt.
 - `reports/status_report.md` - последний Telegram-отчет состояния агента.
 - `reports/public_sources_health.json` - результат последней проверки Freelance.ru, Pchel.net, Kwork и Workzilla.
+- `reports/marketplace_autopilot_plan.json` и `reports/marketplace_autopilot_plan.md` - карта рабочих каналов: где агент может искать, отправлять отклик, вести переписку, отслеживать оплату и какие биржи заблокированы из-за отсутствия API/SMTP/РФ-платежей.
 - `jobs/<job_id>.json` - безопасный журнал всех попыток фоновой задачи заказа.
 - `jobs/dead.json` - окончательная ошибка фоновой задачи после исчерпания повторов.
 - `orders/agent_jobs.sqlite3` - транзакционное планирование и lease; клиентские материалы и тексты заказов остаются в `state.json` и папках заказа.
@@ -190,3 +191,5 @@ PYTHONPATH=src python3 -m vacancy_monitor.business_setup
 GitHub Actions schedule не гарантирует запуск ровно в секунду и не умеет чаще одного раза в 5 минут. Приватные Telegram-каналы через `t.me/s` не читаются; бот увидит только публичные веб-доступные посты.
 
 Полный цикл переписки, сдачи, статуса сделки и правок поддержан для Freelancehunt через официальный API. Freelance.ru и Pchel.net расширяют поиск; первый отклик отправляется только при явно опубликованном email и настроенном SMTP. Биржевые действия без официального API, авторизованного канала или открытого контакта агент не имитирует.
+
+На каждом локальном цикле агент также пишет `orders/reports/marketplace_autopilot_plan.md`. Этот отчет нужен для автономного режима: он показывает, какие площадки прямо сейчас пригодны для полного цикла, какие работают только как поиск, и что нужно подключить следующим слоем.

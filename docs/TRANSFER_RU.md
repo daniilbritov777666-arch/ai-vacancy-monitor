@@ -88,11 +88,15 @@ AI-слой пишет:
 - `orders/reports/freelancehunt_live_api_audit.json`.
 - `orders/reports/status_report.md`.
 - `orders/reports/public_sources_health.json`.
+- `orders/reports/marketplace_autopilot_plan.json`.
+- `orders/reports/marketplace_autopilot_plan.md`.
 - `orders/reports/execution_runtime_health.json`.
 - `orders/agent_jobs.sqlite3`.
 - `orders/<order_id>/jobs/<job_id>.json` и `orders/<order_id>/jobs/dead.json`.
 
 Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher статуса - через `AUTO_PAYMENT_WATCH_ENABLED=true`, Telegram-отчет - через `AUTO_STATUS_REPORT_ENABLED=true`. В `autopilot` рискованные и неопределенные заказы автоматически получают статус `skipped`, а заказ без рабочего канала связи - `contact_unavailable`, без запроса ручного подтверждения. Полный цикл после первого email-отклика невозможен без двустороннего почтового входящего канала; закрытие заказа на Freelancehunt выполняется только для победившей ставки при финальном статусе проекта из API. Фактическое поступление денег проверяется на балансе биржи.
+
+После запуска смотри `orders/reports/marketplace_autopilot_plan.md`: там агент сам отмечает, какие биржи готовы к полному автопилоту, какие работают только как источники поиска, какие блокируются отсутствием API/SMTP, и какие РФ-платежные каналы доступны.
 
 ## Быстрый запуск на новом Mac
 

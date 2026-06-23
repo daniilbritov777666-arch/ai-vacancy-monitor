@@ -77,6 +77,37 @@ def test_run_local_agent_writes_public_source_health_report(tmp_path):
     ]
 
 
+def test_run_local_agent_writes_marketplace_autopilot_plan(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_token="fh-token",
+        auto_outreach_enabled=True,
+        auto_conversation_enabled=True,
+        auto_payment_watch_enabled=True,
+        rss_feeds=["https://freelancehunt.com/projects.rss"],
+        public_project_sources=["freelance_ru"],
+        public_source_probes=[],
+        send_first_run=False,
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        fetch_public_posts=lambda source: [],
+        send_message=lambda text, reply_markup=None: None,
+    )
+
+    report = json.loads(
+        (config.orders_path / "reports" / "marketplace_autopilot_plan.json").read_text(encoding="utf-8")
+    )
+    assert report["ready_channels"] == ["freelancehunt"]
+    assert report["channels"][0]["key"] == "freelancehunt"
+    assert (config.orders_path / "reports" / "marketplace_autopilot_plan.md").exists()
+
+
 def test_run_local_agent_writes_execution_runtime_health_when_enabled(tmp_path, monkeypatch):
     config = replace(make_config(tmp_path), execution_verify_enabled=True)
     calls = []
