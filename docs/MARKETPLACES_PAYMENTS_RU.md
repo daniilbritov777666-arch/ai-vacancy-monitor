@@ -89,7 +89,15 @@ orders/<order_id>/outbox/customer_message.md
   - настроить webhook для статусов платежей.
 - Переменные:
   - `YOOKASSA_SHOP_ID`;
-  - `YOOKASSA_SECRET_KEY`.
+  - `YOOKASSA_SECRET_KEY`;
+  - `PAYMENT_RETURN_URL`.
+- Поведение агента: для email-заказа создается платежная ссылка, запрос сохраняется в `orders/<id>/payment/request.json`, ссылка добавляется в сообщение сдачи результата.
+
+### Резервный РФ-канал без ЮKassa
+
+- Переменная: `PAYMENT_INSTRUCTIONS_RU`.
+- Используется, если ЮKassa не настроена. Агент добавляет эту инструкцию в сообщение сдачи результата и сохраняет `payment/request.json`.
+- Если у email-заказа нет ни ЮKassa, ни `PAYMENT_INSTRUCTIONS_RU`, автосдача блокируется, чтобы не отправить результат без платежного канала.
 
 ## Keychain на Mac
 
@@ -98,6 +106,8 @@ security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.ope
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.freelancehunt-token -w "FREELANCEHUNT_API_TOKEN"
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.yookassa-shop-id -w "YOOKASSA_SHOP_ID"
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.yookassa-secret-key -w "YOOKASSA_SECRET_KEY"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.payment-return-url -w "https://example.ru/payment-return"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.payment-instructions-ru -w "РФ-реквизиты или инструкция оплаты"
 ```
 
 ## Проверка готовности

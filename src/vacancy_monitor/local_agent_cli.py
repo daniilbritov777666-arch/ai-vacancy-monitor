@@ -57,6 +57,12 @@ from vacancy_monitor.job_worker import (
 from vacancy_monitor.marketplace_planner import build_marketplace_plan, write_marketplace_plan_report
 from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.payment_channel import (
+    YooKassaPaymentClient,
+    build_static_payment_request,
+    format_payment_block,
+    write_payment_request,
+)
 from vacancy_monitor.public_sources import (
     PUBLIC_SOURCE_URLS,
     PublicSourceHealth,
@@ -1421,6 +1427,7 @@ def _maybe_finalize_delivery(
 
     delivery_text = _read_delivery_text(store, order)
     try:
+        delivery_text = _append_payment_request_if_needed(store=store, order=order, config=config, text=delivery_text)
         send_delivery(order, delivery_text)
     except Exception as exc:
         _safe_notify(sender, f"Результат по заказу {order.order_id} не отправлен автоматически: {type(exc).__name__}.")
@@ -1429,10 +1436,11 @@ def _maybe_finalize_delivery(
 
     updated = store.update_status(order.order_id, OrderStatus.PAYMENT_REQUESTED)
     _write_delivery_sent_record(store=store, order=updated, text=delivery_text)
+    channel_label = "email" if order.contact and order.contact.channel == "email" else "Freelancehunt"
     _safe_notify(
         sender,
         (
-            "Результат автоматически отправлен заказчику на Freelancehunt.\n\n"
+            f"Результат автоматически отправлен заказчику через {channel_label}.\n\n"
             f"ID: {updated.order_id}\n"
             "Статус: ожидаем оплату / подтверждение безопасной сделки."
         ),
@@ -1604,6 +1612,8 @@ def _auto_delivery_block_reason(
         return f"статус {order.status.value} не разрешен для автосдачи"
     if send_delivery is None:
         return "нет подключенного канала отправки результата"
+    if _needs_external_payment_channel(order) and not _has_external_payment_channel(config):
+        return "нет платежного канала для email-заказа"
     if _auto_delivery_count_today(store) >= config.auto_delivery_daily_limit:
         return "дневной лимит автосдачи исчерпан"
     if not delivery_message_path.exists():
@@ -1632,6 +1642,41 @@ def _auto_delivery_block_reason(
         if term in delivery_text:
             return f"опасный маркер: {term}"
     return None
+
+
+def _append_payment_request_if_needed(*, store: OrderStore, order: Order, config: Config, text: str) -> str:
+    if not _needs_external_payment_channel(order):
+        return text
+    amount_rub = order.price_rub or config.auto_max_price_rub
+    if config.yookassa_shop_id and config.yookassa_secret_key:
+        payment = YooKassaPaymentClient(
+            shop_id=config.yookassa_shop_id,
+            secret_key=config.yookassa_secret_key,
+            return_url=config.payment_return_url,
+        ).create_payment(
+            order=order,
+            amount_rub=amount_rub,
+            description=f"Оплата заказа {order.order_id}: {order.category}",
+        )
+    else:
+        payment = build_static_payment_request(
+            order=order,
+            amount_rub=amount_rub,
+            instructions_ru=config.payment_instructions_ru,
+        )
+    write_payment_request(store=store, order=order, payment=payment)
+    return text.rstrip() + "\n" + format_payment_block(payment) + "\n"
+
+
+def _needs_external_payment_channel(order: Order) -> bool:
+    return bool(order.contact and order.contact.channel == "email")
+
+
+def _has_external_payment_channel(config: Config) -> bool:
+    return bool(
+        (config.yookassa_shop_id and config.yookassa_secret_key)
+        or config.payment_instructions_ru.strip()
+    )
 
 
 def _auto_delivery_count_today(store: OrderStore) -> int:

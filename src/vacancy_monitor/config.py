@@ -63,6 +63,10 @@ class Config:
     imap_password: str = ""
     imap_folder: str = "INBOX"
     imap_use_ssl: bool = True
+    yookassa_shop_id: str | None = None
+    yookassa_secret_key: str | None = None
+    payment_return_url: str = "https://example.ru/payment-return"
+    payment_instructions_ru: str = ""
     agent_queue_enabled: bool = False
     agent_queue_path: Path | None = None
     agent_jobs_per_cycle: int = 3
@@ -97,6 +101,10 @@ class Config:
         imap_password = os.environ.get("IMAP_PASSWORD", "")
         imap_folder = os.environ.get("IMAP_FOLDER", "INBOX").strip() or "INBOX"
         imap_use_ssl = _env_bool("IMAP_USE_SSL", default=True)
+        yookassa_shop_id = os.environ.get("YOOKASSA_SHOP_ID", "").strip() or None
+        yookassa_secret_key = os.environ.get("YOOKASSA_SECRET_KEY", "").strip() or None
+        payment_return_url = os.environ.get("PAYMENT_RETURN_URL", "https://example.ru/payment-return").strip()
+        payment_instructions_ru = os.environ.get("PAYMENT_INSTRUCTIONS_RU", "").strip()
         state_path = Path(os.environ.get("STATE_PATH", "data/seen_posts.json"))
         send_first_run = os.environ.get("SEND_FIRST_RUN", "").lower() in {"1", "true", "yes"}
         orders_path = Path(os.environ.get("ORDERS_PATH", "orders"))
@@ -196,6 +204,10 @@ class Config:
             imap_password=imap_password,
             imap_folder=imap_folder,
             imap_use_ssl=imap_use_ssl,
+            yookassa_shop_id=yookassa_shop_id,
+            yookassa_secret_key=yookassa_secret_key,
+            payment_return_url=payment_return_url,
+            payment_instructions_ru=payment_instructions_ru,
             agent_queue_enabled=agent_queue_enabled,
             agent_queue_path=agent_queue_path,
             agent_jobs_per_cycle=agent_jobs_per_cycle,

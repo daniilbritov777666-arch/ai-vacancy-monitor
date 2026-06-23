@@ -143,6 +143,8 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `FREELANCEHUNT_BID_DAYS` - срок выполнения в днях для первого отклика. По умолчанию `2`.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_SSL` - SMTP для автоотклика на опубликованный email. Обычно порт `587` и STARTTLS; для SMTP SSL используется порт `465` и `SMTP_USE_SSL=true`.
 - `IMAP_HOST`, `IMAP_PORT`, `IMAP_USERNAME`, `IMAP_PASSWORD`, `IMAP_FOLDER`, `IMAP_USE_SSL` - входящая почта для ответов заказчиков после email-отклика. Обычно порт `993`, папка `INBOX`, `IMAP_USE_SSL=true`.
+- `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, `PAYMENT_RETURN_URL` - внешний платежный канал ЮKassa для email-заказов. Агент создает ссылку оплаты и добавляет ее в сообщение сдачи результата.
+- `PAYMENT_INSTRUCTIONS_RU` - резервные РФ-реквизиты/инструкция оплаты для email-заказов, если ЮKassa не настроена. Без ЮKassa и без этой инструкции агент блокирует автосдачу email-заказа, чтобы не отправлять результат без платежного канала.
 
 Файлы AI-слоя в папке заказа:
 
@@ -151,6 +153,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `autopilot/execution_plan.md` - план выполнения;
 - `deliverables/autopilot_result.md` - черновой результат;
 - `outbox/customer_message.md` - сообщение заказчику для отправки.
+- `payment/request.json` - созданный запрос оплаты для внешнего email-заказа.
 - `outbox/freelancehunt_reply_<thread_id>.md` - AI-черновик ответа на входящее сообщение Freelancehunt.
 - `outbox/freelancehunt_reply_<thread_id>.sent.json` - запись реально отправленного автоответа.
 - `outbox/email_reply_<email>.md` - AI-черновик ответа на входящее письмо заказчика.

@@ -27,7 +27,7 @@ from vacancy_monitor.local_agent_cli import (
 )
 from vacancy_monitor.job_queue import AgentJobQueue, JobStatus
 from vacancy_monitor.models import Post
-from vacancy_monitor.order_models import OrderStatus, make_order_from_post
+from vacancy_monitor.order_models import CustomerContact, OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.quality import AIQualityReview
 from vacancy_monitor.public_sources import PublicSourceHealth
@@ -1212,6 +1212,82 @@ def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
     assert (store.order_dir(order.order_id) / "outbox" / "delivery_message.sent.json").exists()
     assert not (store.order_dir(order.order_id) / "outbox" / "delivery_approval_requested.json").exists()
     assert any("Результат автоматически отправлен заказчику" in message for message, _ in sent)
+
+
+def test_auto_delivery_appends_static_payment_request_for_email_order(tmp_path):
+    sent = []
+    delivered = []
+    config = replace(
+        make_config(tmp_path),
+        auto_delivery_enabled=True,
+        payment_instructions_ru="Оплата переводом на карту РФ после проверки результата.",
+    )
+    store = OrderStore(config.orders_path)
+    order = _email_delivery_order(store)
+
+    local_agent_cli._maybe_finalize_delivery(
+        store=store,
+        order=order,
+        sender=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        config=config,
+        send_delivery=lambda order, text: delivered.append((order.order_id, text)),
+        quality_client=None,
+    )
+
+    updated = store.load_order(order.order_id)
+    payment_path = store.order_dir(order.order_id) / "payment" / "request.json"
+    assert updated.status == OrderStatus.PAYMENT_REQUESTED
+    assert payment_path.exists()
+    assert delivered
+    assert "Платежный канал" in delivered[0][1]
+    assert "Оплата переводом на карту РФ" in delivered[0][1]
+    assert "Результат автоматически отправлен заказчику" in sent[-1][0]
+
+
+def test_auto_delivery_blocks_email_order_without_payment_channel(tmp_path):
+    sent = []
+    delivered = []
+    config = replace(make_config(tmp_path), auto_delivery_enabled=True)
+    store = OrderStore(config.orders_path)
+    order = _email_delivery_order(store)
+
+    local_agent_cli._maybe_finalize_delivery(
+        store=store,
+        order=order,
+        sender=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        config=config,
+        send_delivery=lambda order, text: delivered.append((order.order_id, text)),
+        quality_client=None,
+    )
+
+    assert delivered == []
+    assert "нет платежного канала для email-заказа" in sent[0][0]
+    assert store.load_order(order.order_id).status == OrderStatus.AWAITING_DELIVERY_APPROVAL
+
+
+def _email_delivery_order(store: OrderStore):
+    post = Post(
+        source="freelance_ru",
+        post_id="freelance_ru/email-order",
+        url="https://www.freelance.ru/projects/email-order",
+        text="Нужен парсер сайта, бюджет 12 000 руб. Почта client@example.ru",
+        published_at="2026-06-23T10:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Автоматизации/парсеры", risks=[]),
+        status=OrderStatus.OUTREACH_SENT,
+        contact=CustomerContact(channel="email", value="client@example.ru", can_auto_send=True),
+    )
+    store.save_order(order)
+    order_dir = store.order_dir(order.order_id)
+    (order_dir / "execution" / "generated").mkdir(parents=True)
+    (order_dir / "execution" / "generated" / "parser.py").write_text("print('ready')\n", encoding="utf-8")
+    (order_dir / "outbox").mkdir(parents=True)
+    (order_dir / "outbox" / "delivery_message.md").write_text(
+        "Здравствуйте! Подготовил результат для проверки.\n",
+        encoding="utf-8",
+    )
+    return order
 
 
 def test_quality_gate_sends_package_that_passes_local_and_ai_checks(tmp_path):

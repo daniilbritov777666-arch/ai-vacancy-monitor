@@ -39,6 +39,8 @@
 - `PUBLIC_SOURCE_PROBES=kwork,workzilla` - проверяет доступность площадок без импорта демонстрационных заданий.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_SSL` - канал первого email-отклика; если он не настроен, мониторинг источников все равно работает.
 - `IMAP_HOST`, `IMAP_PORT`, `IMAP_USERNAME`, `IMAP_PASSWORD`, `IMAP_FOLDER`, `IMAP_USE_SSL` - входящие email-ответы заказчиков; без IMAP email-канал работает только на первый отклик.
+- `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, `PAYMENT_RETURN_URL` - ЮKassa для внешних email-заказов.
+- `PAYMENT_INSTRUCTIONS_RU` - резервная РФ-инструкция оплаты для email-заказов без ЮKassa.
 - `AUTO_CONVERSATION_ENABLED=true` - агент читает входящие треды Freelancehunt и email-ответы заказчиков, сохраняет переписку, готовит AI-черновик ответа и уведомляет Telegram.
 - `AUTO_REPLY_ENABLED=true` - агент сам отправляет безопасные последующие ответы в тред Freelancehunt или по email.
 - `AUTO_EXECUTION_ENABLED=true` - агент создает рабочий пакет выполнения и стартовые артефакты результата после ответа заказчика.
@@ -127,6 +129,10 @@ security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.ima
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.imap-username -w "robot@example.ru"
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.imap-password -w "IMAP_PASSWORD"
 security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.imap-folder -w "INBOX"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.yookassa-shop-id -w "YOOKASSA_SHOP_ID"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.yookassa-secret-key -w "YOOKASSA_SECRET_KEY"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.payment-return-url -w "https://example.ru/payment-return"
+security add-generic-password -U -a vacancy-agent -s com.codex.vacancy-agent.payment-instructions-ru -w "РФ-реквизиты или инструкция оплаты"
 ```
 
 5. Проверить вручную:

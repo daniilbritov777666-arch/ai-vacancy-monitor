@@ -211,6 +211,22 @@ def test_imap_config_reads_env(monkeypatch):
     assert config.imap_use_ssl is True
 
 
+def test_payment_config_reads_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("YOOKASSA_SHOP_ID", "shop-1")
+    monkeypatch.setenv("YOOKASSA_SECRET_KEY", "secret")
+    monkeypatch.setenv("PAYMENT_RETURN_URL", "https://example.ru/payment-return")
+    monkeypatch.setenv("PAYMENT_INSTRUCTIONS_RU", "Перевод на карту РФ после проверки результата.")
+
+    config = Config.from_env()
+
+    assert config.yookassa_shop_id == "shop-1"
+    assert config.yookassa_secret_key == "secret"
+    assert config.payment_return_url == "https://example.ru/payment-return"
+    assert config.payment_instructions_ru == "Перевод на карту РФ после проверки результата."
+
+
 def test_conversation_config_reads_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
