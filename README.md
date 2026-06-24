@@ -178,6 +178,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `reports/freelancehunt_live_api_audit.json` - последний live-аудит `threads`/`my/bids` Freelancehunt.
 - `reports/status_report.md` - последний Telegram-отчет состояния агента.
 - `reports/public_sources_health.json` - результат последней проверки Freelance.ru, Pchel.net, Kwork и Workzilla.
+- `reports/email_transport_health.json` - TCP-доступность SMTP/IMAP. Если логины настроены, но порты недоступны, email-каналы в плане автопилота блокируются до смены сети/фаервола.
 - `reports/marketplace_autopilot_plan.json` и `reports/marketplace_autopilot_plan.md` - карта рабочих каналов: где агент может искать, отправлять отклик, вести переписку, отслеживать оплату и какие биржи заблокированы из-за отсутствия API/SMTP/РФ-платежей.
 - `jobs/<job_id>.json` - безопасный журнал всех попыток фоновой задачи заказа.
 - `jobs/dead.json` - окончательная ошибка фоновой задачи после исчерпания повторов.

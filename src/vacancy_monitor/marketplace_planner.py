@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from vacancy_monitor.config import Config
+from vacancy_monitor.email_transport_health import EmailTransportHealth
 from vacancy_monitor.order_models import format_moscow_time
 from vacancy_monitor.public_sources import PublicSourceHealth
 
@@ -47,6 +48,7 @@ def build_marketplace_plan(
     *,
     config: Config,
     public_health: list[PublicSourceHealth],
+    email_health: EmailTransportHealth | None = None,
     env: Mapping[str, str] | None = None,
 ) -> MarketplaceAutopilotPlan:
     values = env or os.environ
@@ -59,6 +61,7 @@ def build_marketplace_plan(
             name="Freelance.ru",
             configured="freelance_ru" in config.public_project_sources,
             health=health_by_source.get("freelance_ru"),
+            email_health=email_health,
             config=config,
             priority=3,
         ),
@@ -67,6 +70,7 @@ def build_marketplace_plan(
             name="Pchel.net",
             configured="pchel" in config.public_project_sources,
             health=health_by_source.get("pchel"),
+            email_health=email_health,
             config=config,
             priority=4,
         ),
@@ -167,6 +171,7 @@ def _public_email_channel(
     name: str,
     configured: bool,
     health: PublicSourceHealth | None,
+    email_health: EmailTransportHealth | None,
     config: Config,
     priority: int,
 ) -> MarketplaceChannel:
@@ -179,8 +184,17 @@ def _public_email_channel(
         blockers.append("SMTP не настроен")
     if not config.imap_host:
         blockers.append("IMAP не настроен")
-    outreach = "email_auto" if config.smtp_host and config.smtp_from else "manual_or_email_only"
-    conversation = "email_auto" if config.imap_host and config.smtp_host and config.smtp_from else "email_if_customer_replies"
+    smtp_ready = bool(config.smtp_host and config.smtp_from)
+    imap_ready = bool(config.imap_host and config.smtp_host and config.smtp_from)
+    if email_health is not None:
+        if smtp_ready and not email_health.smtp_reachable:
+            blockers.append(f"SMTP недоступен: {email_health.smtp_error or 'connection failed'}")
+            smtp_ready = False
+        if imap_ready and not email_health.imap_reachable:
+            blockers.append(f"IMAP недоступен: {email_health.imap_error or 'connection failed'}")
+            imap_ready = False
+    outreach = "email_auto" if smtp_ready else "manual_or_email_only"
+    conversation = "email_auto" if imap_ready else "email_if_customer_replies"
     return MarketplaceChannel(
         key=key,
         name=name,

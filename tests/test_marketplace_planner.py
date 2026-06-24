@@ -7,6 +7,7 @@ from vacancy_monitor.marketplace_planner import (
     format_marketplace_plan,
     write_marketplace_plan_report,
 )
+from vacancy_monitor.email_transport_health import EmailTransportHealth
 from vacancy_monitor.public_sources import PublicSourceHealth
 
 
@@ -97,6 +98,38 @@ def test_marketplace_plan_marks_public_source_email_conversation_when_smtp_and_i
     assert freelance_ru.conversation == "email_auto"
     assert "SMTP не настроен" not in freelance_ru.blockers
     assert "IMAP не настроен" not in freelance_ru.blockers
+
+
+def test_marketplace_plan_blocks_email_auto_when_transport_is_unreachable(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        public_project_sources=["freelance_ru"],
+        smtp_host="smtp.yandex.ru",
+        smtp_from="robot@example.ru",
+        imap_host="imap.yandex.ru",
+    )
+    email_health = EmailTransportHealth(
+        checked_at="2026-06-24T10:00:00+03:00",
+        status="unavailable",
+        smtp_configured=True,
+        imap_configured=True,
+        smtp_host="smtp.yandex.ru",
+        smtp_port=465,
+        imap_host="imap.yandex.ru",
+        imap_port=993,
+        smtp_reachable=False,
+        imap_reachable=False,
+        smtp_error="TimeoutError: timed out",
+        imap_error="TimeoutError: timed out",
+    )
+
+    plan = build_marketplace_plan(config=config, public_health=[], email_health=email_health)
+
+    freelance_ru = next(channel for channel in plan.channels if channel.key == "freelance_ru")
+    assert freelance_ru.outreach == "manual_or_email_only"
+    assert freelance_ru.conversation == "email_if_customer_replies"
+    assert "SMTP недоступен: TimeoutError: timed out" in freelance_ru.blockers
+    assert "IMAP недоступен: TimeoutError: timed out" in freelance_ru.blockers
 
 
 def test_marketplace_plan_reports_rf_payment_readiness(tmp_path):

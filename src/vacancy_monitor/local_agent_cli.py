@@ -38,6 +38,11 @@ from vacancy_monitor.email_inbound import (
     write_email_reply_sent_record,
 )
 from vacancy_monitor.email_outreach import SMTPOutreachClient
+from vacancy_monitor.email_transport_health import (
+    EmailTransportHealth,
+    probe_email_transport,
+    write_email_transport_health_report,
+)
 from vacancy_monitor.freelancehunt import (
     FreelancehuntBid,
     FreelancehuntClient,
@@ -160,6 +165,7 @@ def run_local_agent_once(
     email_inbound_client: EmailInboundClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
     execution_draft_client: ExecutionDraftClient | None = None,
+    probe_email_transport_func: Callable[[Config], EmailTransportHealth] = probe_email_transport,
     process_jobs: bool = True,
 ) -> MonitorSummary:
     store = OrderStore(config.orders_path)
@@ -212,8 +218,9 @@ def run_local_agent_once(
             config.orders_path / "reports" / "public_sources_health.json",
             public_health,
         )
+    email_health = _maybe_probe_email_transport(config=config, probe_email_transport_func=probe_email_transport_func)
     if _should_write_marketplace_plan(config):
-        marketplace_plan = build_marketplace_plan(config=config, public_health=public_health)
+        marketplace_plan = build_marketplace_plan(config=config, public_health=public_health, email_health=email_health)
         write_marketplace_plan_report(config.orders_path / "reports", marketplace_plan)
 
     def tracked_public_fetch(source: str) -> list[Post]:
@@ -353,6 +360,18 @@ def _should_write_marketplace_plan(config: Config) -> bool:
         or bool(config.public_source_probes)
         or config.orders_path.exists()
     )
+
+
+def _maybe_probe_email_transport(
+    *,
+    config: Config,
+    probe_email_transport_func: Callable[[Config], EmailTransportHealth],
+) -> EmailTransportHealth | None:
+    if not (config.smtp_host or config.imap_host):
+        return None
+    report = probe_email_transport_func(config)
+    write_email_transport_health_report(config.orders_path / "reports" / "email_transport_health.json", report)
+    return report
 
 
 def _reconcile_agent_jobs(*, config: Config, store: OrderStore, queue: AgentJobQueue) -> None:

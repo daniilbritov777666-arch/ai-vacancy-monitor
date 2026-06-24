@@ -17,6 +17,7 @@ from vacancy_monitor.execution_verifier import (
     VerificationStatus,
 )
 from vacancy_monitor.email_inbound import EmailInboundMessage
+from vacancy_monitor.email_transport_health import EmailTransportHealth
 from vacancy_monitor.freelancehunt import FreelancehuntMyBid, FreelancehuntThread, FreelancehuntThreadMessage
 from vacancy_monitor.local_agent_cli import (
     _process_agent_jobs,
@@ -107,6 +108,50 @@ def test_run_local_agent_writes_marketplace_autopilot_plan(tmp_path):
     assert report["ready_channels"] == ["freelancehunt"]
     assert report["channels"][0]["key"] == "freelancehunt"
     assert (config.orders_path / "reports" / "marketplace_autopilot_plan.md").exists()
+
+
+def test_run_local_agent_writes_email_transport_health_report(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        smtp_host="smtp.yandex.ru",
+        smtp_port=465,
+        smtp_from="robot@example.ru",
+        imap_host="imap.yandex.ru",
+        imap_port=993,
+        public_project_sources=["freelance_ru"],
+        send_first_run=False,
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        fetch_public_posts=lambda source: [],
+        probe_email_transport_func=lambda config: EmailTransportHealth(
+            checked_at="2026-06-24T10:00:00+03:00",
+            status="unavailable",
+            smtp_configured=True,
+            imap_configured=True,
+            smtp_host="smtp.yandex.ru",
+            smtp_port=465,
+            imap_host="imap.yandex.ru",
+            imap_port=993,
+            smtp_reachable=False,
+            imap_reachable=False,
+            smtp_error="TimeoutError: timed out",
+            imap_error="TimeoutError: timed out",
+        ),
+        send_message=lambda text, reply_markup=None: None,
+    )
+
+    email_report = json.loads(
+        (config.orders_path / "reports" / "email_transport_health.json").read_text(encoding="utf-8")
+    )
+    plan = json.loads((config.orders_path / "reports" / "marketplace_autopilot_plan.json").read_text(encoding="utf-8"))
+    freelance_ru = next(channel for channel in plan["channels"] if channel["key"] == "freelance_ru")
+    assert email_report["status"] == "unavailable"
+    assert "SMTP недоступен" in " ".join(freelance_ru["blockers"])
 
 
 def test_run_local_agent_writes_execution_runtime_health_when_enabled(tmp_path, monkeypatch):
