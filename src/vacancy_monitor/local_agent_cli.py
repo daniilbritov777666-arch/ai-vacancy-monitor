@@ -262,6 +262,7 @@ def run_local_agent_once(
                 sender=sender,
                 autopilot_client=autopilot_client,
                 send_outreach=outreach_sender,
+                email_health=email_health,
             )
 
     summary = run_monitor(
@@ -286,6 +287,7 @@ def run_local_agent_once(
                 autopilot_client=autopilot_client,
                 send_outreach=outreach_sender,
                 recovered_leases=recovered_leases,
+                email_health=email_health,
             )
         else:
             write_queue_health(
@@ -301,12 +303,14 @@ def run_local_agent_once(
             sender=sender,
             autopilot_client=autopilot_client,
             send_outreach=outreach_sender,
+            email_health=email_health,
         )
     _process_pending_auto_outreach_orders(
         config=config,
         store=store,
         sender=sender,
         send_outreach=outreach_sender,
+        email_health=email_health,
     )
     _sync_freelancehunt_conversations(
         config=config,
@@ -389,6 +393,7 @@ def _process_agent_jobs(
     autopilot_client: AutopilotClient | None,
     send_outreach: Callable[[Order, str], None] | None,
     recovered_leases: int,
+    email_health: EmailTransportHealth | None = None,
 ) -> None:
     for _ in range(config.agent_jobs_per_cycle):
         claimed_at = datetime.now(tz=UTC)
@@ -429,6 +434,7 @@ def _process_agent_jobs(
                 sender=sender,
                 autopilot_client=autopilot_client,
                 send_outreach=send_outreach,
+                email_health=email_health,
                 raise_on_error=True,
             )
         except Exception as exc:
@@ -490,6 +496,7 @@ def _process_pending_autopilot_orders(
     sender: Callable[..., None],
     autopilot_client: AutopilotClient | None,
     send_outreach: Callable[[Order, str], None] | None,
+    email_health: EmailTransportHealth | None = None,
 ) -> None:
     if config.auto_mode == "off" or not config.openai_api_key:
         return
@@ -507,6 +514,7 @@ def _process_pending_autopilot_orders(
             sender=sender,
             autopilot_client=autopilot_client,
             send_outreach=send_outreach,
+            email_health=email_health,
         )
 
 
@@ -516,6 +524,7 @@ def _process_pending_auto_outreach_orders(
     store: OrderStore,
     sender: Callable[..., None],
     send_outreach: Callable[[Order, str], None] | None,
+    email_health: EmailTransportHealth | None = None,
 ) -> None:
     if not config.auto_outreach_enabled:
         return
@@ -528,6 +537,7 @@ def _process_pending_auto_outreach_orders(
             store=store,
             sender=sender,
             send_outreach=send_outreach,
+            email_health=email_health,
         )
 
 
@@ -1773,6 +1783,7 @@ def _maybe_run_autopilot(
     sender: Callable[..., None],
     autopilot_client: AutopilotClient | None,
     send_outreach: Callable[[Order, str], None] | None,
+    email_health: EmailTransportHealth | None = None,
     raise_on_error: bool = False,
 ) -> Order:
     if config.auto_mode == "off" or not config.openai_api_key:
@@ -1798,6 +1809,7 @@ def _maybe_run_autopilot(
             store=store,
             sender=sender,
             send_outreach=send_outreach,
+            email_health=email_health,
         )
     except Exception as exc:
         if raise_on_error:
@@ -1816,6 +1828,7 @@ def _maybe_auto_send_outreach(
     store: OrderStore,
     sender: Callable[..., None],
     send_outreach: Callable[[Order, str], None] | None,
+    email_health: EmailTransportHealth | None = None,
 ) -> Order:
     if not config.auto_outreach_enabled or order.status != OrderStatus.DRAFT_READY:
         return order
@@ -1826,6 +1839,11 @@ def _maybe_auto_send_outreach(
     if not order.contact or not order.contact.can_auto_send:
         updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: контакт не опубликован.")
+        return updated
+    email_block_reason = _email_outreach_block_reason(order=order, email_health=email_health)
+    if email_block_reason:
+        updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
+        _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: {email_block_reason}.")
         return updated
     if send_outreach is None:
         if order.contact.channel == "email":
@@ -1870,6 +1888,16 @@ def _maybe_auto_send_outreach(
         ),
     )
     return updated
+
+
+def _email_outreach_block_reason(*, order: Order, email_health: EmailTransportHealth | None) -> str | None:
+    if not order.contact or order.contact.channel != "email" or email_health is None:
+        return None
+    if not email_health.smtp_configured:
+        return "SMTP не настроен"
+    if not email_health.smtp_reachable:
+        return f"SMTP недоступен: {email_health.smtp_error or 'connection failed'}"
+    return None
 
 
 def _auto_outreach_count_today(store: OrderStore) -> int:

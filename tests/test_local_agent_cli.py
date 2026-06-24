@@ -719,6 +719,58 @@ def test_run_local_agent_auto_sends_safe_freelancehunt_outreach(tmp_path):
     assert all(reply_markup is None for _, reply_markup in sent)
 
 
+def test_run_local_agent_blocks_email_outreach_when_smtp_transport_is_unreachable(tmp_path):
+    sent = []
+    send_attempts = []
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        auto_outreach_enabled=True,
+        smtp_host="smtp.yandex.ru",
+        smtp_port=465,
+        smtp_from="robot@example.ru",
+        public_project_sources=["freelance_ru"],
+        channels=[],
+        rss_feeds=[],
+    )
+    post = Post(
+        source="freelance_ru",
+        post_id="freelance_ru:blocked-email",
+        url="https://freelance.ru/task/view/blocked-email",
+        text="Нужен Telegram-бот для заявок. Почта client@example.ru. Бюджет 12 000 руб.",
+        published_at="2026-06-24T12:00:00+03:00",
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        fetch_public_posts=lambda source: [post],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        autopilot_client=FakeAutopilotClient(safe_autopilot_result()),
+        send_outreach=lambda order, text: send_attempts.append((order.order_id, text)),
+        probe_email_transport_func=lambda config: EmailTransportHealth(
+            checked_at="2026-06-24T12:00:00+03:00",
+            status="unavailable",
+            smtp_configured=True,
+            imap_configured=False,
+            smtp_host="smtp.yandex.ru",
+            smtp_port=465,
+            smtp_reachable=False,
+            imap_reachable=False,
+            smtp_error="TimeoutError: timed out",
+        ),
+    )
+
+    store = OrderStore(config.orders_path)
+    order_id = next(Path(config.orders_path).glob("*/state.json")).parent.name
+    order = store.load_order(order_id)
+    assert order.status == OrderStatus.CONTACT_UNAVAILABLE
+    assert send_attempts == []
+    assert any("SMTP недоступен" in message for message, _ in sent)
+
+
 def test_run_local_agent_writes_send_failure_diagnostics_for_failed_outreach(tmp_path):
     sent = []
     config = replace(
