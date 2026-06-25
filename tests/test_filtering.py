@@ -81,6 +81,7 @@ def test_accepts_one_off_automation_task():
     assert result.accepted is True
     assert "боты" in result.reasons
     assert "автоматизация/интеграции" in result.reasons
+    assert result.score >= 8
 
 
 def test_rejects_technical_task_when_it_is_long_term_support():
@@ -269,6 +270,7 @@ def test_accepts_one_off_content_task_with_fixed_deliverable():
 
     assert result.accepted is True
     assert "тексты/контент" in result.reasons
+    assert result.score < 8
 
 
 def test_rejects_non_content_projects_that_only_mention_text_or_documents():

@@ -180,6 +180,25 @@ def test_run_local_agent_writes_execution_runtime_health_when_enabled(tmp_path, 
     ]
 
 
+def test_run_local_agent_continues_when_execution_runtime_health_cannot_be_written(tmp_path, monkeypatch):
+    config = replace(make_config(tmp_path), execution_verify_enabled=True)
+    monkeypatch.setattr(
+        local_agent_cli,
+        "write_execution_runtime_health",
+        lambda **kwargs: (_ for _ in ()).throw(OSError(28, "No space left on device")),
+    )
+
+    summary = run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        fetch_public_posts=None,
+        send_message=lambda text, reply_markup=None: None,
+    )
+
+    assert summary.checked == 0
+
+
 def test_auto_outreach_marks_order_without_contact_unavailable(tmp_path):
     config = replace(make_config(tmp_path), auto_outreach_enabled=True, channels=[], rss_feeds=[])
     store = OrderStore(config.orders_path)
@@ -1105,6 +1124,40 @@ def test_run_local_agent_auto_sends_safe_email_reply(tmp_path):
     assert "можете начать сегодня" in (order_dir / "conversation.md").read_text(encoding="utf-8")
     assert store.load_order(order.order_id).status == OrderStatus.DISCOVERY
     assert any("AI-ответ отправлен заказчику по email" in message for message, _ in sent)
+
+
+def test_run_local_agent_skips_email_sync_when_imap_transport_is_unreachable(tmp_path):
+    sent = []
+    config = replace(
+        make_config(tmp_path),
+        auto_conversation_enabled=True,
+        imap_host="imap.yandex.ru",
+        imap_port=993,
+        channels=[],
+        rss_feeds=[],
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        probe_email_transport_func=lambda config: EmailTransportHealth(
+            checked_at="2026-06-25T10:00:00+03:00",
+            status="unavailable",
+            smtp_configured=False,
+            imap_configured=True,
+            imap_host="imap.yandex.ru",
+            imap_port=993,
+            smtp_reachable=False,
+            imap_reachable=False,
+            imap_error="TimeoutError: timed out",
+        ),
+    )
+
+    assert not any("Синхронизация email-переписки не выполнена" in message for message, _ in sent)
+    report = config.orders_path / "reports" / "email_sync_skipped.json"
+    assert "IMAP недоступен: TimeoutError: timed out" in report.read_text(encoding="utf-8")
 
 
 def test_run_local_agent_blocks_risky_customer_thread_reply(tmp_path):

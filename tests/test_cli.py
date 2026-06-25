@@ -113,3 +113,38 @@ def test_public_source_failure_does_not_block_other_sources(tmp_path):
 
     assert summary.errors == 1
     assert matched == ["freelance_ru/3"]
+
+
+def test_run_monitor_processes_stronger_matches_before_lower_priority_posts(tmp_path):
+    matched = []
+    state_path = tmp_path / "seen_posts.json"
+    SeenState({"existing"}).save(state_path)
+    high_priority = Post(
+        source="freelancehunt",
+        post_id="freelancehunt/high",
+        url="https://example.com/high",
+        text="Разовая задача: Telegram-бот для заявок, API интеграция и Google Sheets. Бюджет 15000 руб.",
+        published_at=None,
+    )
+    low_priority = Post(
+        source="freelancehunt",
+        post_id="freelancehunt/low",
+        url="https://example.com/low",
+        text="Разовая задача: подготовить текст для страницы. Бюджет 8000 руб.",
+        published_at=None,
+    )
+
+    summary = run_monitor(
+        channels=[],
+        rss_feeds=["freelancehunt"],
+        state_path=state_path,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [high_priority, low_priority],
+        send_message=lambda text: None,
+        send_first_run=False,
+        on_match=lambda post, result: matched.append((post.post_id, result.score)),
+    )
+
+    assert summary.sent == 2
+    assert [post_id for post_id, _score in matched] == ["freelancehunt/high", "freelancehunt/low"]
+    assert matched[0][1] > matched[1][1]

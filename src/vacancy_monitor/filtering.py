@@ -174,6 +174,16 @@ NEGATIVE_PATTERNS = {
     ],
 }
 
+REASON_WEIGHTS = {
+    "боты": 4,
+    "автоматизация/интеграции": 3,
+    "таблицы/дашборды": 2,
+    "crm/no-code": 2,
+    "тексты/контент": 1,
+    "можно без глубокого кода": 0,
+    "есть сигнал оплаты": 2,
+}
+
 
 def evaluate_post(post: Post) -> MatchResult:
     text = post.text.lower()
@@ -203,9 +213,20 @@ def evaluate_post(post: Post) -> MatchResult:
     if not has_technical_signal:
         risks.append("не IT-заказ")
 
-    score = len(reasons)
+    score = _score_match(text=text, reasons=reasons)
     accepted = has_technical_signal and has_money_signal and not risks
     return MatchResult(accepted=accepted, score=score, reasons=reasons, risks=risks)
+
+
+def _score_match(*, text: str, reasons: list[str]) -> int:
+    score = sum(REASON_WEIGHTS.get(reason, 1) for reason in reasons)
+    if re.search(r"разов(ая|ий|ое|і|ий)|готов(ый|ого)?\s+результат|фиксированн(ый|ого)?\s+этап", text):
+        score += 1
+    if re.search(r"срок\s+\d+|дедлайн|за\s+\d+\s*(дн|час)", text):
+        score += 1
+    if "тексты/контент" in reasons:
+        score = min(score, 7)
+    return score
 
 
 def format_match_message(post: Post, result: MatchResult) -> str:

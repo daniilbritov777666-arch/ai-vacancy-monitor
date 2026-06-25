@@ -170,11 +170,14 @@ def run_local_agent_once(
 ) -> MonitorSummary:
     store = OrderStore(config.orders_path)
     if config.execution_verify_enabled:
-        write_execution_runtime_health(
-            path=config.orders_path / "reports" / "execution_runtime_health.json",
-            python_image=config.execution_python_image,
-            node_image=config.execution_node_image,
-        )
+        try:
+            write_execution_runtime_health(
+                path=config.orders_path / "reports" / "execution_runtime_health.json",
+                python_image=config.execution_python_image,
+                node_image=config.execution_node_image,
+            )
+        except OSError:
+            pass
     queue = None
     recovered_leases = 0
     queue_enabled = bool(config.agent_queue_enabled and config.auto_mode != "off" and config.openai_api_key)
@@ -325,6 +328,7 @@ def run_local_agent_once(
         config=config,
         store=store,
         sender=sender,
+        email_health=email_health,
         email_client=email_inbound_client,
         conversation_reply_client=conversation_reply_client,
         execution_draft_client=execution_draft_client,
@@ -810,6 +814,7 @@ def _sync_email_conversations(
     config: Config,
     store: OrderStore,
     sender: Callable[..., None],
+    email_health: EmailTransportHealth | None = None,
     email_client: EmailInboundClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
     execution_draft_client: ExecutionDraftClient | None = None,
@@ -817,6 +822,14 @@ def _sync_email_conversations(
     send_delivery: Callable[[Order, str], None] | None = None,
 ) -> None:
     if not config.auto_conversation_enabled or not config.imap_host:
+        return
+    if (
+        email_client is None
+        and email_health is not None
+        and email_health.imap_configured
+        and not email_health.imap_reachable
+    ):
+        _write_email_sync_skipped_report(config=config, reason=f"IMAP недоступен: {email_health.imap_error or 'connection failed'}")
         return
 
     client = email_client or IMAPEmailClient(
@@ -880,6 +893,23 @@ def _sync_email_conversations(
             execution_draft_client=draft_client,
             send_delivery=send_delivery or send_email,
         )
+
+
+def _write_email_sync_skipped_report(*, config: Config, reason: str) -> None:
+    path = config.orders_path / "reports" / "email_sync_skipped.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "checked_at": format_moscow_time(),
+                "reason": reason,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _maybe_draft_email_reply(

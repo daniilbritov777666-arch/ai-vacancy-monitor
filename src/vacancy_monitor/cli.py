@@ -58,6 +58,7 @@ def run_monitor(
             print(f"Failed to fetch {source}: {exc}")
             continue
 
+        candidates: list[tuple[Post, MatchResult]] = []
         for post in reversed(posts):
             if state.contains(post.post_id):
                 continue
@@ -74,6 +75,9 @@ def run_monitor(
                 state.add(post.post_id)
                 continue
 
+            candidates.append((post, result))
+
+        for post, result in sorted(candidates, key=lambda item: item[1].score, reverse=True):
             matched += 1
             try:
                 if on_match is not None:
