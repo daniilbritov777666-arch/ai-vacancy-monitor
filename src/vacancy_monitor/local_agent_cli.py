@@ -1901,6 +1901,7 @@ def _maybe_auto_send_outreach(
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} не отправлен: {type(exc).__name__}.")
         return updated
 
+    _clear_outreach_channel_blocked(store=store, order=order)
     updated = replace(
         order,
         status=OrderStatus.OUTREACH_SENT,
@@ -1919,6 +1920,16 @@ def _maybe_auto_send_outreach(
         ),
     )
     return updated
+
+
+def _clear_outreach_channel_blocked(*, store: OrderStore, order: Order) -> None:
+    path = store.order_dir(order.order_id) / "outbox" / "channel_blocked.json"
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
 
 
 def _write_outreach_channel_blocked(*, store: OrderStore, order: Order, reason: str) -> bool:

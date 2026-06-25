@@ -813,6 +813,7 @@ def test_run_local_agent_retries_email_outreach_after_smtp_transport_recovers(tm
 
     assert store.load_order(order_id).status == OrderStatus.OUTREACH_SENT
     assert send_attempts == [(order_id, "Здравствуйте! Готов выполнить Telegram-бота для заявок.")]
+    assert not blocked_report.exists()
 
 
 def test_run_local_agent_writes_send_failure_diagnostics_for_failed_outreach(tmp_path):
