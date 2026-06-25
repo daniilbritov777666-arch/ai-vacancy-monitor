@@ -1872,14 +1872,15 @@ def _maybe_auto_send_outreach(
         return updated
     email_block_reason = _email_outreach_block_reason(order=order, email_health=email_health)
     if email_block_reason:
-        updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
-        _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: {email_block_reason}.")
-        return updated
+        if _write_outreach_channel_blocked(store=store, order=order, reason=email_block_reason):
+            _safe_notify(sender, f"Автоотклик по заказу {order.order_id} отложен: {email_block_reason}.")
+        return order
     if send_outreach is None:
         if order.contact.channel == "email":
-            updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
-            _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: SMTP не настроен.")
-            return updated
+            reason = "SMTP не настроен"
+            if _write_outreach_channel_blocked(store=store, order=order, reason=reason):
+                _safe_notify(sender, f"Автоотклик по заказу {order.order_id} отложен: {reason}.")
+            return order
         return order
     if _auto_outreach_count_today(store) >= config.auto_outreach_daily_limit:
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} пропущен: дневной лимит исчерпан.")
@@ -1918,6 +1919,28 @@ def _maybe_auto_send_outreach(
         ),
     )
     return updated
+
+
+def _write_outreach_channel_blocked(*, store: OrderStore, order: Order, reason: str) -> bool:
+    path = store.order_dir(order.order_id) / "outbox" / "channel_blocked.json"
+    payload = {
+        "checked_at": format_moscow_time(),
+        "channel": order.contact.channel if order.contact else None,
+        "reason": reason,
+        "retry_status": order.status.value,
+    }
+    if path.exists():
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+            if previous.get("reason") == reason:
+                previous["checked_at"] = payload["checked_at"]
+                path.write_text(json.dumps(previous, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                return False
+        except (OSError, json.JSONDecodeError):
+            pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return True
 
 
 def _email_outreach_block_reason(*, order: Order, email_health: EmailTransportHealth | None) -> str | None:

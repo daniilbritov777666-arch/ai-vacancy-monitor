@@ -738,7 +738,7 @@ def test_run_local_agent_auto_sends_safe_freelancehunt_outreach(tmp_path):
     assert all(reply_markup is None for _, reply_markup in sent)
 
 
-def test_run_local_agent_blocks_email_outreach_when_smtp_transport_is_unreachable(tmp_path):
+def test_run_local_agent_retries_email_outreach_after_smtp_transport_recovers(tmp_path):
     sent = []
     send_attempts = []
     config = replace(
@@ -785,9 +785,34 @@ def test_run_local_agent_blocks_email_outreach_when_smtp_transport_is_unreachabl
     store = OrderStore(config.orders_path)
     order_id = next(Path(config.orders_path).glob("*/state.json")).parent.name
     order = store.load_order(order_id)
-    assert order.status == OrderStatus.CONTACT_UNAVAILABLE
+    assert order.status == OrderStatus.DRAFT_READY
     assert send_attempts == []
     assert any("SMTP недоступен" in message for message, _ in sent)
+    blocked_report = store.order_dir(order.order_id) / "outbox" / "channel_blocked.json"
+    assert "SMTP недоступен" in blocked_report.read_text(encoding="utf-8")
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        fetch_public_posts=lambda source: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        autopilot_client=FakeAutopilotClient(safe_autopilot_result()),
+        send_outreach=lambda order, text: send_attempts.append((order.order_id, text)),
+        probe_email_transport_func=lambda config: EmailTransportHealth(
+            checked_at="2026-06-24T12:05:00+03:00",
+            status="degraded",
+            smtp_configured=True,
+            imap_configured=False,
+            smtp_host="smtp.yandex.ru",
+            smtp_port=465,
+            smtp_reachable=True,
+            imap_reachable=False,
+        ),
+    )
+
+    assert store.load_order(order_id).status == OrderStatus.OUTREACH_SENT
+    assert send_attempts == [(order_id, "Здравствуйте! Готов выполнить Telegram-бота для заявок.")]
 
 
 def test_run_local_agent_writes_send_failure_diagnostics_for_failed_outreach(tmp_path):
