@@ -906,6 +906,93 @@ def test_run_local_agent_closes_order_when_freelancehunt_project_is_gone(tmp_pat
     assert payload["status_code"] == 410
 
 
+def test_run_local_agent_retries_retryable_send_failed_outreach(tmp_path):
+    auto_sent = []
+    config = replace(
+        make_config(tmp_path),
+        auto_outreach_enabled=True,
+        auto_outreach_max_age_hours=0,
+        freelancehunt_api_token="fh-token",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок. Бюджет 12 000 руб.",
+        published_at="2026-06-25T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты"),
+        status=OrderStatus.SEND_FAILED,
+        price_rub=12000,
+    )
+    store.save_order(order)
+    order_dir = store.order_dir(order.order_id)
+    (order_dir / "autopilot").mkdir(parents=True, exist_ok=True)
+    (order_dir / "autopilot" / "outreach.md").write_text("Здравствуйте! Готов выполнить задачу.", encoding="utf-8")
+    (order_dir / "outbox").mkdir(parents=True, exist_ok=True)
+    (order_dir / "outbox" / "send_failure.json").write_text(
+        json.dumps({"status_code": 500}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        fetch_public_posts=None,
+        send_message=lambda text, reply_markup=None: None,
+        send_outreach=lambda order, text: auto_sent.append((order.order_id, text)),
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.OUTREACH_SENT
+    assert auto_sent == [(order.order_id, "Здравствуйте! Готов выполнить задачу.")]
+
+
+def test_run_local_agent_closes_existing_send_failed_gone_order(tmp_path):
+    auto_sent = []
+    sent = []
+    config = replace(
+        make_config(tmp_path),
+        auto_outreach_enabled=True,
+        freelancehunt_api_token="fh-token",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок. Бюджет 12 000 руб.",
+        published_at="2026-06-25T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты"), status=OrderStatus.SEND_FAILED)
+    store.save_order(order)
+    order_dir = store.order_dir(order.order_id)
+    (order_dir / "outbox").mkdir(parents=True, exist_ok=True)
+    (order_dir / "outbox" / "send_failure.json").write_text(
+        json.dumps({"status_code": 410}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        fetch_public_posts=None,
+        send_message=lambda text, reply_markup=None: sent.append(text),
+        send_outreach=lambda order, text: auto_sent.append((order.order_id, text)),
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.CLOSED
+    assert auto_sent == []
+    assert any("закрыт" in message.lower() and "410" in message for message in sent)
+
+
 def test_run_local_agent_auto_sends_when_ai_warnings_are_non_blocking(tmp_path):
     auto_sent = []
     result = replace(safe_autopilot_result(), risk_flags=["уточнить формат доступа к Google Sheets"])

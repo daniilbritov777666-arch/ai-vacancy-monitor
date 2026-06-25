@@ -533,16 +533,67 @@ def _process_pending_auto_outreach_orders(
     if not config.auto_outreach_enabled:
         return
     for order in store.list_orders():
-        if order.status != OrderStatus.DRAFT_READY:
-            continue
-        _maybe_auto_send_outreach(
+        if order.status == OrderStatus.SEND_FAILED:
+            order = _recover_send_failed_outreach(
+                config=config,
+                order=order,
+                store=store,
+                sender=sender,
+                send_outreach=send_outreach,
+                email_health=email_health,
+            )
+        if order.status == OrderStatus.DRAFT_READY:
+            _maybe_auto_send_outreach(
+                config=config,
+                order=order,
+                store=store,
+                sender=sender,
+                send_outreach=send_outreach,
+                email_health=email_health,
+            )
+
+
+def _recover_send_failed_outreach(
+    *,
+    config: Config,
+    order: Order,
+    store: OrderStore,
+    sender: Callable[..., None],
+    send_outreach: Callable[[Order, str], None] | None,
+    email_health: EmailTransportHealth | None = None,
+) -> Order:
+    status_code = _read_outreach_failure_status_code(store=store, order=order)
+    if status_code == 410:
+        updated = store.update_status(order.order_id, OrderStatus.CLOSED)
+        _safe_notify(sender, f"Заказ {order.order_id} закрыт: площадка вернула 410 Gone при отклике.")
+        return updated
+    if not _is_retryable_outreach_failure(status_code):
+        return order
+    retry_order = replace(order, status=OrderStatus.DRAFT_READY, updated_at=format_moscow_time())
+    store.save_order(retry_order)
+    return _maybe_auto_send_outreach(
             config=config,
-            order=order,
+            order=retry_order,
             store=store,
             sender=sender,
             send_outreach=send_outreach,
             email_health=email_health,
         )
+
+
+def _read_outreach_failure_status_code(*, store: OrderStore, order: Order) -> int | None:
+    path = store.order_dir(order.order_id) / "outbox" / "send_failure.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8")).get("status_code")
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, int) else None
+
+
+def _is_retryable_outreach_failure(status_code: int | None) -> bool:
+    if status_code is None:
+        return True
+    return status_code in {408, 409, 425, 429} or status_code >= 500
 
 
 def _sync_freelancehunt_bids(
