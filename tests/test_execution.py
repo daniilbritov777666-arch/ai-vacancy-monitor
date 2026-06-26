@@ -1,3 +1,5 @@
+import json
+
 from vacancy_monitor.execution import ExecutionDraftPackage, prepare_execution_workspace, write_execution_draft_package
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import make_order_from_post
@@ -31,6 +33,9 @@ def test_prepare_execution_workspace_creates_category_runbook(tmp_path):
     assert (starter_dir / "bot.py").exists()
     assert "python-telegram-bot" in (starter_dir / "requirements.txt").read_text(encoding="utf-8")
     assert "TELEGRAM_BOT_TOKEN" in (starter_dir / ".env.example").read_text(encoding="utf-8")
+    task_route = json.loads((path / "task_route.json").read_text(encoding="utf-8"))
+    assert task_route["task_type"] == "telegram_bot"
+    assert task_route["verifier_profile"] == "code"
 
 
 def test_prepare_execution_workspace_does_not_overwrite_manual_edits(tmp_path):
@@ -76,6 +81,29 @@ def test_prepare_execution_workspace_creates_parser_starter(tmp_path):
     assert (starter_dir / "parser.py").exists()
     assert "requests" in (starter_dir / "requirements.txt").read_text(encoding="utf-8")
     assert "CSV" in (starter_dir / "README.md").read_text(encoding="utf-8")
+    assert json.loads((path / "task_route.json").read_text(encoding="utf-8"))["task_type"] == "parser"
+
+
+def test_prepare_execution_workspace_creates_website_starter(tmp_path):
+    store = OrderStore(tmp_path / "orders")
+    order = make_order_from_post(
+        Post(
+            source="freelancehunt.com/projects.rss",
+            post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/site/778.html",
+            url="https://freelancehunt.com/project/site/778.html",
+            text="Нужно сверстать одностраничный сайт на HTML/CSS.",
+            published_at="2026-06-01T12:00:00+03:00",
+        ),
+        category="Сайты",
+        risks=[],
+    )
+    store.save_order(order)
+
+    path = prepare_execution_workspace(store=store, order=order)
+
+    assert json.loads((path / "task_route.json").read_text(encoding="utf-8"))["task_type"] == "website"
+    assert (path / "starter" / "index.html").exists()
+    assert (path / "starter" / "styles.css").exists()
 
 
 def test_prepare_execution_workspace_creates_content_draft(tmp_path):

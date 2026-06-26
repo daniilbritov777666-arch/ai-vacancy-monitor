@@ -88,6 +88,7 @@ from vacancy_monitor.status_report import (
     should_send_status_report,
     write_status_report_snapshot,
 )
+from vacancy_monitor.task_router import route_order_task
 from vacancy_monitor.telegram import answer_callback_query, get_updates, send_telegram_message
 from vacancy_monitor.telegram_control import CallbackAction, build_order_keyboard, parse_callback_data, resolve_transition
 
@@ -1751,7 +1752,7 @@ def _run_delivery_quality_gate(
         local_report = check_generated_package(
             store.order_dir(order.order_id) / "execution" / "generated",
             delivery_message=package.delivery_message_ru,
-            task_category=order.category,
+            task_category=route_order_task(order).task_type.value,
         )
         ai_review: AIQualityReview | None = None
         ai_error: str | None = None

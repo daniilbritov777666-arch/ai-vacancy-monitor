@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import re
 import shutil
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from vacancy_monitor.order_models import Order, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.task_router import TaskType, route_order_task
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,7 @@ def prepare_execution_workspace(*, store: OrderStore, order: Order) -> Path:
     _write_if_missing(execution_dir / "context.md", _context_markdown(order))
     _write_if_missing(execution_dir / "checklist.md", _checklist_markdown(order))
     _write_if_missing(execution_dir / "notes.md", _notes_markdown(order))
+    _write_task_route(execution_dir, order)
     _write_starter_artifacts(execution_dir, order)
     return execution_dir
 
@@ -111,39 +114,42 @@ def _context_markdown(order: Order) -> str:
 
 def _checklist_markdown(order: Order) -> str:
     kind = _execution_kind(order)
-    if kind == "telegram_bot":
+    if kind == TaskType.TELEGRAM_BOT.value:
         body = _telegram_bot_checklist()
-    elif kind == "spreadsheet":
+    elif kind in {TaskType.SPREADSHEET.value, TaskType.DASHBOARD.value}:
         body = _spreadsheet_checklist()
-    elif kind == "content":
+    elif kind == TaskType.CONTENT.value:
         body = _content_checklist()
+    elif kind == TaskType.WEBSITE.value:
+        body = _website_checklist()
     else:
         body = _automation_checklist()
     return f"# Чеклист выполнения\n\n{body}\n"
 
 
 def _execution_kind(order: Order) -> str:
-    lower_category = order.category.lower()
-    lower_text = order.original_text.lower()
-    if "telegram" in lower_category or "бот" in lower_category or "telegram" in lower_text:
-        return "telegram_bot"
-    if "таблиц" in lower_category or "дашборд" in lower_category or "excel" in lower_text or "google sheets" in lower_text:
-        return "spreadsheet"
-    if "текст" in lower_category or "контент" in lower_category or "стать" in lower_text:
-        return "content"
-    return "automation"
+    return route_order_task(order).task_type.value
 
 
 def _write_starter_artifacts(execution_dir: Path, order: Order) -> None:
     kind = _execution_kind(order)
-    if kind == "telegram_bot":
+    if kind == TaskType.TELEGRAM_BOT.value:
         _write_telegram_bot_starter(execution_dir, order)
-    elif kind == "spreadsheet":
+    elif kind in {TaskType.SPREADSHEET.value, TaskType.DASHBOARD.value}:
         _write_spreadsheet_starter(execution_dir, order)
-    elif kind == "content":
+    elif kind == TaskType.CONTENT.value:
         _write_content_starter(execution_dir, order)
+    elif kind == TaskType.WEBSITE.value:
+        _write_website_starter(execution_dir, order)
     else:
         _write_automation_starter(execution_dir, order)
+
+
+def _write_task_route(execution_dir: Path, order: Order) -> None:
+    route = route_order_task(order)
+    payload = route.to_dict()
+    payload["created_at"] = format_moscow_time()
+    (execution_dir / "task_route.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _notes_markdown(order: Order) -> str:
@@ -199,6 +205,16 @@ def _content_checklist() -> str:
         "- [ ] Подготовить первый вариант текста.\n"
         "- [ ] Проверить факты, стиль и повторы.\n"
         "- [ ] Подготовить финальный файл и сообщение заказчику.\n"
+    )
+
+
+def _website_checklist() -> str:
+    return (
+        "- [ ] Выписать структуру страниц и блоков.\n"
+        "- [ ] Подготовить HTML/CSS/JS или проект сайта.\n"
+        "- [ ] Проверить адаптивность базовых экранов.\n"
+        "- [ ] Убедиться, что все ссылки и формы описаны.\n"
+        "- [ ] Подготовить инструкцию локального просмотра и сообщение заказчику.\n"
     )
 
 
@@ -340,6 +356,47 @@ def _write_content_starter(execution_dir: Path, order: Order) -> None:
             "## Черновик\n\n"
             "[Текст будет доработан после уточнения темы, аудитории и тона.]\n"
         ),
+    )
+
+
+def _write_website_starter(execution_dir: Path, order: Order) -> None:
+    starter_dir = execution_dir / "starter"
+    starter_dir.mkdir(exist_ok=True)
+    _write_if_missing(starter_dir / "README.md", _starter_readme(order, "Сайт/лендинг"))
+    _write_if_missing(
+        starter_dir / "index.html",
+        """<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Проект</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <h1>Проект</h1>
+    <p>Стартовая структура сайта. Текст и блоки нужно адаптировать под ТЗ заказчика.</p>
+  </main>
+</body>
+</html>
+""",
+    )
+    _write_if_missing(
+        starter_dir / "styles.css",
+        """body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  color: #1f2933;
+  background: #f7f8fa;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 48px 20px;
+}
+""",
     )
 
 

@@ -1763,6 +1763,32 @@ def test_quality_gate_repairs_spreadsheet_package_without_structured_file(tmp_pa
     assert conversation_client.thread_messages == [("thread-1", "Отправляю исправленный результат.")]
 
 
+def test_quality_gate_uses_task_route_for_dashboard_requirements(tmp_path):
+    conversation_client = FakeFreelancehuntConversationClient()
+    execution_client = FakeQualityExecutionClient(
+        initial_files={"README.md": "# Дашборд\n\nПодготовлено описание результата.\n"},
+        repaired_files={"dashboard.csv": "metric,value\nrevenue,120000\n"},
+    )
+    config, store, order = _quality_delivery_setup(tmp_path)
+    order = replace(order, category="Дашборды", original_text="Нужен dashboard по продажам без упоминания таблиц.")
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    latest = json.loads((store.order_dir(order.order_id) / "quality" / "attempt-001.json").read_text(encoding="utf-8"))
+    route = json.loads((store.order_dir(order.order_id) / "execution" / "task_route.json").read_text(encoding="utf-8"))
+    assert route["task_type"] == "dashboard"
+    assert any(issue["code"] == "spreadsheet_deliverable_missing" for issue in latest["local"]["issues"])
+    assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
+
+
 def test_quality_gate_fails_after_two_repairs_without_manual_approval(tmp_path):
     sent = []
     conversation_client = FakeFreelancehuntConversationClient()

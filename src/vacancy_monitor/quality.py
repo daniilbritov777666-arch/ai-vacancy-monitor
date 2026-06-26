@@ -93,9 +93,9 @@ def _check_category_deliverables(*, files: list[Path], generated_dir: Path, task
     category = (task_category or "").lower()
     if not category:
         return []
-    if "таблиц" in category or "дашборд" in category:
+    if "таблиц" in category or "дашборд" in category or category in {"spreadsheet", "dashboard"}:
         return _check_spreadsheet_deliverables(files=files, generated_dir=generated_dir)
-    if "текст" in category or "контент" in category:
+    if "текст" in category or "контент" in category or category == "content":
         return _check_text_deliverables(files=files, generated_dir=generated_dir)
     return []
 
