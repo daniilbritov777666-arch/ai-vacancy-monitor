@@ -2354,6 +2354,10 @@ def _approve_delivery(
     send_delivery: Callable[[Order, str], None] | None,
 ) -> Order:
     delivery_text = _read_delivery_text(store, order)
+    quality_block = _delivery_quality_block_reason(store=store, order=order)
+    if quality_block:
+        answer(f"QA не пройдена: {quality_block}. Результат не отправлен.")
+        return order
     if send_delivery is None:
         updated = store.update_status(order.order_id, OrderStatus.PAYMENT_REQUESTED)
         answer("Готово. Отправь результат вручную.")
@@ -2379,23 +2383,119 @@ def _read_delivery_text(store: OrderStore, order: Order) -> str:
 
 
 def _write_delivery_sent_record(*, store: OrderStore, order: Order, text: str) -> None:
-    path = _delivery_sent_path(store, order)
-    path.write_text(
-        json.dumps(
-            {
-                "sent_at": format_moscow_time(),
-                "message": text,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
+    order_dir = store.order_dir(order.order_id)
+    outbox_dir = order_dir / "outbox"
+    outbox_dir.mkdir(parents=True, exist_ok=True)
+    sent_at = format_moscow_time()
+    legacy_payload = {"sent_at": sent_at, "message": text}
+    _delivery_sent_path(store, order).write_text(
+        json.dumps(legacy_payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    manifest_path = _write_delivery_package_manifest(store=store, order=order)
+    receipt = {
+        "status": "sent",
+        "sent_at": sent_at,
+        "order_id": order.order_id,
+        "channel": _delivery_channel(order),
+        "message": text,
+        "generated_files": _generated_file_list(store=store, order=order),
+        "quality": _delivery_quality_summary(store=store, order=order),
+        "fallback": {
+            "manifest": str(manifest_path.relative_to(order_dir)),
+            "instruction": "Если канал площадки не поддерживает вложения, передайте заказчику файлы из локального пакета и сохраните внешний receipt.",
+        },
+    }
+    _delivery_receipt_path(store, order).write_text(
+        json.dumps(receipt, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
 
 def _delivery_sent_path(store: OrderStore, order: Order):
     return store.order_dir(order.order_id) / "outbox" / "delivery_message.sent.json"
+
+
+def _delivery_receipt_path(store: OrderStore, order: Order):
+    return store.order_dir(order.order_id) / "outbox" / "delivery_receipt.json"
+
+
+def _delivery_channel(order: Order) -> str:
+    if order.contact and order.contact.channel:
+        return order.contact.channel
+    return "manual"
+
+
+def _generated_file_list(*, store: OrderStore, order: Order) -> list[str]:
+    order_dir = store.order_dir(order.order_id)
+    generated_dir = order_dir / "execution" / "generated"
+    if not generated_dir.exists():
+        return []
+    return [
+        path.relative_to(order_dir).as_posix()
+        for path in sorted(generated_dir.rglob("*"))
+        if path.is_file()
+    ]
+
+
+def _latest_quality_payload(*, store: OrderStore, order: Order) -> dict | None:
+    path = store.order_dir(order.order_id) / "quality" / "latest.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"passed": False, "error": "invalid_quality_report"}
+
+
+def _delivery_quality_summary(*, store: OrderStore, order: Order) -> dict:
+    payload = _latest_quality_payload(store=store, order=order)
+    if payload is None:
+        return {"passed": None, "report": None}
+    return {
+        "passed": bool(payload.get("passed")),
+        "report": "quality/latest.json",
+    }
+
+
+def _delivery_quality_block_reason(*, store: OrderStore, order: Order) -> str | None:
+    payload = _latest_quality_payload(store=store, order=order)
+    if payload is None or payload.get("passed") is True:
+        return None
+    issue_codes: list[str] = []
+    for section in ("local", "execution_verification", "ai"):
+        value = payload.get(section)
+        if not isinstance(value, dict):
+            continue
+        for issue in value.get("issues", []) or []:
+            if isinstance(issue, dict) and issue.get("code"):
+                issue_codes.append(str(issue["code"]))
+            elif isinstance(issue, str):
+                issue_codes.append(issue)
+    return ", ".join(dict.fromkeys(issue_codes)) or "quality/latest.json passed=false"
+
+
+def _write_delivery_package_manifest(*, store: OrderStore, order: Order):
+    order_dir = store.order_dir(order.order_id)
+    outbox_dir = order_dir / "outbox"
+    path = outbox_dir / "delivery_package_manifest.json"
+    payload = {
+        "created_at": format_moscow_time(),
+        "order_id": order.order_id,
+        "generated_files": _generated_file_list(store=store, order=order),
+        "delivery_message": "outbox/delivery_message.md",
+        "quality": _delivery_quality_summary(store=store, order=order),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (outbox_dir / "delivery_fallback.md").write_text(
+        (
+            "# Fallback отправки результата\n\n"
+            "Если канал площадки не поддерживает вложения, передайте заказчику файлы из `execution/generated/` "
+            "и текст из `outbox/delivery_message.md`, затем сохраните внешний receipt в папке заказа.\n"
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def _read_outreach_text(store: OrderStore, order: Order) -> str:

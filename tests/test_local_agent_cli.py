@@ -1501,7 +1501,13 @@ def test_run_local_agent_requests_delivery_approval_after_execution_draft(tmp_pa
 def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
     sent = []
     conversation_client = FakeFreelancehuntConversationClient()
-    execution_client = FakeExecutionDraftClient()
+    execution_client = FakeQualityExecutionClient(
+        initial_files={
+            "bot.py": "print('ready')\n",
+            "README.md": "# Запуск\n\n`python bot.py`\n",
+            ".env.example": "TELEGRAM_BOT_TOKEN=\n",
+        }
+    )
     config = replace(
         make_config(tmp_path),
         auto_conversation_enabled=True,
@@ -1509,6 +1515,7 @@ def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
         auto_execution_enabled=True,
         auto_execution_draft_enabled=True,
         auto_delivery_enabled=True,
+        auto_quality_enabled=True,
         freelancehunt_api_token="fh-token",
         openai_api_key="sk-test",
         channels=[],
@@ -1536,8 +1543,13 @@ def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
 
     updated = store.load_order(order.order_id)
     assert updated.status == OrderStatus.PAYMENT_REQUESTED
-    assert ("thread-1", "Здравствуйте! Подготовил рабочий вариант для проверки.") in conversation_client.thread_messages
+    assert ("thread-1", "Отправляю готовый результат.") in conversation_client.thread_messages
     assert (store.order_dir(order.order_id) / "outbox" / "delivery_message.sent.json").exists()
+    receipt = json.loads((store.order_dir(order.order_id) / "outbox" / "delivery_receipt.json").read_text(encoding="utf-8"))
+    assert receipt["status"] == "sent"
+    assert receipt["channel"] == "freelancehunt"
+    assert receipt["quality"]["passed"] is True
+    assert "execution/generated/bot.py" in receipt["generated_files"]
     assert not (store.order_dir(order.order_id) / "outbox" / "delivery_approval_requested.json").exists()
     assert any("Результат автоматически отправлен заказчику" in message for message, _ in sent)
 
@@ -2406,6 +2418,46 @@ def test_handle_order_callback_sends_delivery_when_allowed(tmp_path):
     assert updated.status == OrderStatus.PAYMENT_REQUESTED
     assert delivered == [(order.order_id, "Здравствуйте! Результат готов к проверке.")]
     assert answers == ["Результат отправлен заказчику."]
+
+
+def test_handle_order_callback_blocks_delivery_when_quality_failed(tmp_path):
+    answers = []
+    delivered = []
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты", risks=[]),
+        status=OrderStatus.AWAITING_DELIVERY_APPROVAL,
+    )
+    store.save_order(order)
+    order_dir = store.order_dir(order.order_id)
+    outbox = order_dir / "outbox"
+    outbox.mkdir(parents=True)
+    (outbox / "delivery_message.md").write_text("Здравствуйте! Результат готов к проверке.\n", encoding="utf-8")
+    quality_dir = order_dir / "quality"
+    quality_dir.mkdir()
+    (quality_dir / "latest.json").write_text(
+        json.dumps({"passed": False, "local": {"issues": [{"code": "missing_readme"}]}}),
+        encoding="utf-8",
+    )
+
+    updated = handle_order_callback(
+        callback_data=f"o:as:{order.order_id}",
+        store=store,
+        answer=answers.append,
+        send_delivery=lambda order, text: delivered.append((order.order_id, text)),
+    )
+
+    assert updated is not None
+    assert updated.status == OrderStatus.AWAITING_DELIVERY_APPROVAL
+    assert delivered == []
+    assert "QA не пройдена" in answers[-1]
 
 
 def test_poll_telegram_once_routes_delivery_callback(tmp_path):
