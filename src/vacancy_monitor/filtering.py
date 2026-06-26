@@ -31,6 +31,8 @@ POSITIVE_PATTERNS = {
         r"битрикс|bitrix",
         r"\bamo\b|amocrm",
         r"воронк(?:а|и|у|ой)?\s+продаж|продажн\w*\s+воронк",
+        r"checkout",
+        r"shopify",
     ],
     "таблицы/дашборды": [
         r"google sheets",
@@ -172,6 +174,19 @@ NEGATIVE_PATTERNS = {
         r"массов(о|ая|ые|ых)\s+.*аккаунт",
         r"обход\s+.*(лимит|огранич)",
     ],
+    "финансовый/трейдинг риск": [
+        r"pocket\s*option",
+        r"трейдинг[-\s]?бот",
+        r"торгов(ый|ого)\s+бот",
+        r"ставк[аи]\s+.*(верн|сигнал)",
+        r"\bbrent\s+oil\b",
+    ],
+    "массовые сообщения/автоматизация аккаунта": [
+        r"1000\+?\s+предложен",
+        r"массов(ая|ые|ых|о)\s+.*(сообщ|предложен|рассыл)",
+        r"авторизац\w*\s+через\s+логин\s+и\s+парол",
+        r"от\s+одного\s+аккаунт",
+    ],
 }
 
 REASON_WEIGHTS = {
@@ -182,6 +197,7 @@ REASON_WEIGHTS = {
     "тексты/контент": 1,
     "можно без глубокого кода": 0,
     "есть сигнал оплаты": 2,
+    "оплата через биржу": 2,
 }
 
 
@@ -208,14 +224,25 @@ def evaluate_post(post: Post) -> MatchResult:
     )
     if has_money_signal:
         reasons.append("есть сигнал оплаты")
+    elif _is_trusted_paid_platform(post):
+        has_money_signal = True
+        reasons.append("оплата через биржу")
 
-    has_technical_signal = any(reason not in {"есть сигнал оплаты", "можно без глубокого кода"} for reason in reasons)
+    has_technical_signal = any(
+        reason not in {"есть сигнал оплаты", "оплата через биржу", "можно без глубокого кода"} for reason in reasons
+    )
     if not has_technical_signal:
         risks.append("не IT-заказ")
 
     score = _score_match(text=text, reasons=reasons)
     accepted = has_technical_signal and has_money_signal and not risks
     return MatchResult(accepted=accepted, score=score, reasons=reasons, risks=risks)
+
+
+def _is_trusted_paid_platform(post: Post) -> bool:
+    source = post.source.lower()
+    url = post.url.lower()
+    return "freelancehunt.com" in source or "freelancehunt.com" in url
 
 
 def _score_match(*, text: str, reasons: list[str]) -> int:

@@ -84,6 +84,52 @@ def test_accepts_one_off_automation_task():
     assert result.score >= 8
 
 
+def test_accepts_freelancehunt_platform_project_without_explicit_budget():
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt:checkout-funnel",
+        url="https://freelancehunt.com/project/checkout-funnel/1637707.html",
+        text=(
+            "Реализовать лендинг/checkout-воронку на другой платформе по аналогии "
+            "с текущим Shopify-решением. Есть текущая воронка, нужно собрать аналог."
+        ),
+        published_at="2026-06-25T13:07:08+03:00",
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is True
+    assert "crm/no-code" in result.reasons
+    assert "оплата через биржу" in result.reasons
+
+
+def test_rejects_public_project_without_explicit_budget_signal():
+    post = make_post(
+        "Реализовать лендинг/checkout-воронку на другой платформе по аналогии "
+        "с текущим Shopify-решением."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "оплата через биржу" not in result.reasons
+
+
+def test_rejects_freelancehunt_platform_project_without_technical_signal():
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt:revit",
+        url="https://freelancehunt.com/project/point-cloud-revit/1637721.html",
+        text="Облачная точка в Revit. Нужно смоделировать здание и землю по облаку точек.",
+        published_at="2026-06-25T13:46:20+03:00",
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "не IT-заказ" in result.risks
+
+
 def test_rejects_technical_task_when_it_is_long_term_support():
     post = make_post(
         "Нужен специалист по Битрикс24 на постоянную поддержку: мелкие доработки каждый месяц, "
@@ -107,6 +153,30 @@ def test_rejects_platform_limit_bypass_tasks():
 
     assert result.accepted is False
     assert "обход ограничений платформ" in result.risks
+
+
+def test_rejects_financial_trading_bot_task():
+    post = make_post(
+        "Pocket Option трейдинг бот. Нужен бот, чтобы ставки были верные, "
+        "считывались с Pocket Option по Brent Oil. Бюджет 3200UAH."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "финансовый/трейдинг риск" in result.risks
+
+
+def test_rejects_mass_platform_messaging_bot_task():
+    post = make_post(
+        "БОТ ТГ для Auto Ria. Бот должен отправлять 1000+ предложений за сутки "
+        "от одного аккаунта, авторизация через логин и пароль Ria. Бюджет 7000UAH."
+    )
+
+    result = evaluate_post(post)
+
+    assert result.accepted is False
+    assert "массовые сообщения/автоматизация аккаунта" in result.risks
 
 
 def test_rejects_marketplace_product_selection_vacancy():
