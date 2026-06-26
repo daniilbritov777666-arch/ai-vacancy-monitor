@@ -93,7 +93,75 @@ def write_payment_request(*, store: OrderStore, order: Order, payment: PaymentRe
     path = store.order_dir(order.order_id) / "payment" / "request.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payment.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    append_payment_ledger_event(
+        store=store,
+        order=order,
+        event="payment_requested",
+        provider=payment.provider,
+        amount_rub=payment.amount_rub,
+        status="requested",
+        payment_id=payment.payment_id,
+        payment_url=payment.payment_url,
+    )
     return path
+
+
+def append_payment_ledger_event(
+    *,
+    store: OrderStore,
+    order: Order,
+    event: str,
+    provider: str,
+    amount_rub: int,
+    status: str,
+    payment_id: str | None = None,
+    payment_url: str | None = None,
+) -> dict[str, Any]:
+    ledger = load_payment_ledger(store=store, order=order)
+    entry = {
+        "event": event,
+        "provider": provider,
+        "amount_rub": max(0, int(amount_rub or 0)),
+        "status": status,
+        "created_at": format_moscow_time(),
+    }
+    if payment_id:
+        entry["payment_id"] = payment_id
+    if payment_url:
+        entry["payment_url"] = payment_url
+    ledger["events"].append(entry)
+    ledger["current_status"] = status
+    if event == "payment_requested":
+        ledger["requested_amount_rub"] = entry["amount_rub"]
+    if event in {"payment_confirmed", "payment_completed"}:
+        ledger["confirmed_amount_rub"] = entry["amount_rub"]
+    path = _payment_ledger_path(store=store, order=order)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(ledger, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return ledger
+
+
+def load_payment_ledger(*, store: OrderStore, order: Order) -> dict[str, Any]:
+    path = _payment_ledger_path(store=store, order=order)
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                payload.setdefault("order_id", order.order_id)
+                payload.setdefault("events", [])
+                payload.setdefault("requested_amount_rub", 0)
+                payload.setdefault("confirmed_amount_rub", 0)
+                payload.setdefault("current_status", "none")
+                return payload
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {
+        "order_id": order.order_id,
+        "current_status": "none",
+        "requested_amount_rub": 0,
+        "confirmed_amount_rub": 0,
+        "events": [],
+    }
 
 
 def format_payment_block(payment: PaymentRequest) -> str:
@@ -120,3 +188,7 @@ def _rub_value(amount_rub: int) -> str:
 def _idempotence_key(order: Order) -> str:
     digest = hashlib.sha1(f"{order.order_id}:payment".encode("utf-8")).hexdigest()[:16]
     return f"{order.order_id}-{digest}"[:64]
+
+
+def _payment_ledger_path(*, store: OrderStore, order: Order):
+    return store.order_dir(order.order_id) / "payment" / "ledger.json"

@@ -7,6 +7,7 @@ from vacancy_monitor.payment_channel import (
     YooKassaPaymentClient,
     build_static_payment_request,
     format_payment_block,
+    load_payment_ledger,
     write_payment_request,
 )
 
@@ -102,3 +103,10 @@ def test_static_payment_request_is_written_to_order_folder(tmp_path):
     assert payload["provider"] == "static_requisites"
     assert payload["amount_rub"] == 12000
     assert "Перевод на карту РФ" in format_payment_block(payment)
+    ledger = load_payment_ledger(store=store, order=order)
+    assert ledger["order_id"] == order.order_id
+    assert ledger["current_status"] == "requested"
+    assert ledger["requested_amount_rub"] == 12000
+    assert ledger["confirmed_amount_rub"] == 0
+    assert ledger["events"][0]["event"] == "payment_requested"
+    assert ledger["events"][0]["provider"] == "static_requisites"

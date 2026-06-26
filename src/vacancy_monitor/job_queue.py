@@ -130,6 +130,38 @@ class AgentJobQueue:
     def fail(self, job_id: str, error: Exception, *, now: datetime) -> AgentJob:
         return self._finish(job_id, status=JobStatus.DEAD, error=error, now=now)
 
+    def reopen_dead(self, *, idempotency_key: str, max_attempts: int, now: datetime) -> AgentJob | None:
+        timestamp = _iso(now)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is None or row["status"] != JobStatus.DEAD.value:
+                return None
+            connection.execute(
+                """
+                UPDATE jobs
+                SET status = ?, attempts = 0, max_attempts = ?, available_at = ?,
+                    lease_until = NULL, last_error_type = NULL, last_error_message = NULL,
+                    completed_at = NULL, updated_at = ?
+                WHERE idempotency_key = ? AND status = ?
+                """,
+                (
+                    JobStatus.PENDING.value,
+                    max_attempts,
+                    timestamp,
+                    timestamp,
+                    idempotency_key,
+                    JobStatus.DEAD.value,
+                ),
+            )
+            reopened = connection.execute(
+                "SELECT * FROM jobs WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        return _job_from_row(reopened)
+
     def retry(
         self,
         job_id: str,

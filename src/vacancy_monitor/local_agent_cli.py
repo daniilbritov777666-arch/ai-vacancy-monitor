@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import replace
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -61,9 +62,11 @@ from vacancy_monitor.job_worker import (
 )
 from vacancy_monitor.marketplace_planner import build_marketplace_plan, write_marketplace_plan_report
 from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
+from vacancy_monitor.order_run_report import write_order_run_report
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.payment_channel import (
     YooKassaPaymentClient,
+    append_payment_ledger_event,
     build_static_payment_request,
     format_payment_block,
     write_payment_request,
@@ -341,6 +344,7 @@ def run_local_agent_once(
         sender=sender,
         freelancehunt_client=freelancehunt_client,
     )
+    _write_order_run_reports(store=store)
     _maybe_send_status_report(
         config=config,
         store=store,
@@ -348,6 +352,14 @@ def run_local_agent_once(
         freelancehunt_client=freelancehunt_client,
     )
     return summary
+
+
+def _write_order_run_reports(*, store: OrderStore) -> None:
+    for order in store.list_orders():
+        try:
+            write_order_run_report(store=store, order=order)
+        except OSError:
+            continue
 
 
 def _enqueue_advance_order(*, config: Config, queue: AgentJobQueue, order: Order) -> None:
@@ -385,6 +397,11 @@ def _maybe_probe_email_transport(
 def _reconcile_agent_jobs(*, config: Config, store: OrderStore, queue: AgentJobQueue) -> None:
     for order in store.list_orders():
         if order.status == OrderStatus.AWAITING_RESPONSE_APPROVAL:
+            queue.reopen_dead(
+                idempotency_key=f"advance_order:{order.order_id}",
+                max_attempts=config.agent_job_max_attempts,
+                now=datetime.now(tz=UTC),
+            )
             _enqueue_advance_order(config=config, queue=queue, order=order)
 
 
@@ -414,6 +431,17 @@ def _process_agent_jobs(
                     order_dir=store.order_dir(order.order_id),
                     job=job,
                     outcome="already_advanced",
+                    error=None,
+                    now=datetime.now(tz=UTC),
+                )
+                continue
+            if _order_is_stale(order, max_age_hours=config.auto_outreach_max_age_hours):
+                store.update_status(order.order_id, OrderStatus.SKIPPED)
+                queue.complete(job.job_id, now=datetime.now(tz=UTC))
+                write_job_attempt(
+                    order_dir=store.order_dir(order.order_id),
+                    job=job,
+                    outcome="stale_skipped",
                     error=None,
                     now=datetime.now(tz=UTC),
                 )
@@ -506,6 +534,9 @@ def _process_pending_autopilot_orders(
         return
     for order in store.list_orders():
         if order.status != OrderStatus.AWAITING_RESPONSE_APPROVAL:
+            continue
+        if _order_is_stale(order, max_age_hours=config.auto_outreach_max_age_hours):
+            store.update_status(order.order_id, OrderStatus.SKIPPED)
             continue
         if (store.order_dir(order.order_id) / "autopilot" / "analysis.json").exists():
             if config.auto_mode == "autopilot":
@@ -631,6 +662,15 @@ def _sync_freelancehunt_bids(
             )
         if order.status == OrderStatus.PAYMENT_REQUESTED and bid.is_winner and _project_is_completed(bid):
             updated = store.update_status(order.order_id, OrderStatus.CLOSED)
+            append_payment_ledger_event(
+                store=store,
+                order=updated,
+                event="payment_confirmed",
+                provider="freelancehunt_safe",
+                amount_rub=_payment_amount_rub(updated),
+                status="confirmed",
+                payment_id=bid.bid_id,
+            )
             _safe_notify(
                 sender,
                 (
@@ -749,6 +789,16 @@ def _project_is_completed(bid: FreelancehuntMyBid) -> bool:
         "принят",
     ]
     return any(marker in text for marker in markers)
+
+
+def _payment_amount_rub(order: Order) -> int:
+    if order.price_rub and order.price_rub > 0:
+        return order.price_rub
+    text = order.original_text.lower().replace("\xa0", " ")
+    match = re.search(r"(\d[\d\s.,]*)\s*(?:₽|руб|р\.)", text)
+    if not match:
+        return 0
+    return int(re.sub(r"\D", "", match.group(1)) or "0")
 
 
 def _maybe_send_status_report(

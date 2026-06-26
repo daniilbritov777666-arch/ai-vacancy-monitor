@@ -4,6 +4,7 @@ from vacancy_monitor.freelancehunt import FreelancehuntMyBid, FreelancehuntThrea
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.payment_channel import build_static_payment_request, write_payment_request
 from vacancy_monitor.status_report import audit_freelancehunt_api, build_status_report_text
 
 
@@ -79,3 +80,35 @@ def test_status_report_records_api_errors(tmp_path):
     ]
     assert "threads: TimeoutError" in text
     assert "bids: RuntimeError 404" in text
+
+
+def test_status_report_includes_funnel_and_payment_ledger(tmp_path):
+    store = OrderStore(tmp_path / "orders")
+    post = Post(
+        source="freelance_ru",
+        post_id="freelance_ru:1",
+        url="https://www.freelance.ru/projects/1",
+        text="Нужен парсер. Почта client@example.ru. Бюджет 12 000 руб.",
+        published_at="2026-06-26T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Автоматизации/парсеры", risks=[]),
+        status=OrderStatus.PAYMENT_REQUESTED,
+        price_rub=12000,
+    )
+    store.save_order(order)
+    payment = build_static_payment_request(
+        order=order,
+        amount_rub=12000,
+        instructions_ru="Оплата по СБП.",
+    )
+    write_payment_request(store=store, order=order, payment=payment)
+
+    audit = audit_freelancehunt_api(store=store, client=None)
+    text = build_status_report_text(store=store, audit=audit)
+
+    assert "Воронка:" in text
+    assert "- Ожидают оплаты: 1" in text
+    assert "Деньги:" in text
+    assert "- Запрошено: 12 000 ₽" in text
+    assert "- Подтверждено: 0 ₽" in text

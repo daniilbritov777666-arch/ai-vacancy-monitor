@@ -8,8 +8,9 @@ from typing import Protocol
 
 from vacancy_monitor.conversation import find_order_for_thread
 from vacancy_monitor.freelancehunt import FreelancehuntMyBid, FreelancehuntThread
-from vacancy_monitor.order_models import MOSCOW_TZ, format_moscow_time
+from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.payment_channel import load_payment_ledger
 
 
 class FreelancehuntAuditClient(Protocol):
@@ -76,8 +77,11 @@ def audit_freelancehunt_api(*, store: OrderStore, client: FreelancehuntAuditClie
 
 
 def build_status_report_text(*, store: OrderStore, audit: FreelancehuntApiAudit) -> str:
-    status_counts = Counter(order.status.value for order in store.list_orders())
+    orders = store.list_orders()
+    status_counts = Counter(order.status.value for order in orders)
     status_lines = "\n".join(f"- {status}: {count}" for status, count in sorted(status_counts.items())) or "- заказов нет"
+    funnel = _build_funnel(orders)
+    money = _build_money_summary(store=store, orders=orders)
     bid_lines = (
         ", ".join(f"{status}: {count}" for status, count in (audit.bid_statuses or {}).items()) or "нет"
     )
@@ -88,6 +92,16 @@ def build_status_report_text(*, store: OrderStore, audit: FreelancehuntApiAudit)
         f"Время: {audit.checked_at}\n\n"
         "Локальные заказы:\n"
         f"{status_lines}\n\n"
+        "Воронка:\n"
+        f"- Всего заказов в базе: {funnel['total']}\n"
+        f"- Отклики/контакт отправлены: {funnel['outreach_sent']}\n"
+        f"- В работе/переписке: {funnel['in_work']}\n"
+        f"- Ожидают оплаты: {funnel['awaiting_payment']}\n"
+        f"- Закрыты: {funnel['closed']}\n\n"
+        "Деньги:\n"
+        f"- Запрошено: {_format_rub(money['requested_amount_rub'])}\n"
+        f"- Подтверждено: {_format_rub(money['confirmed_amount_rub'])}\n"
+        f"- Заказов с платежным реестром: {money['orders_with_ledger']}\n\n"
         "API Freelancehunt:\n"
         f"- Треды: {audit.threads_total}, непрочитанные: {audit.unread_threads}\n"
         f"- Ставки: {audit.bids_total}, победившие: {audit.winning_bids}\n"
@@ -146,3 +160,46 @@ def _find_order_for_project_id(store: OrderStore, project_id: str | None) -> boo
         if f"/{project_id}.html" in order.source_url or f"/{project_id}" in order.source_url:
             return True
     return False
+
+
+def _build_funnel(orders: list[Order]) -> dict[str, int]:
+    outreach_sent_statuses = {
+        OrderStatus.OUTREACH_SENT,
+        OrderStatus.DISCOVERY,
+        OrderStatus.AWAITING_DELIVERY_APPROVAL,
+        OrderStatus.PAYMENT_REQUESTED,
+    }
+    in_work_statuses = {
+        OrderStatus.DISCOVERY,
+        OrderStatus.DRAFT_READY,
+        OrderStatus.AWAITING_DELIVERY_APPROVAL,
+        OrderStatus.QUALITY_FAILED,
+    }
+    return {
+        "total": len(orders),
+        "outreach_sent": sum(1 for order in orders if order.status in outreach_sent_statuses),
+        "in_work": sum(1 for order in orders if order.status in in_work_statuses),
+        "awaiting_payment": sum(1 for order in orders if order.status == OrderStatus.PAYMENT_REQUESTED),
+        "closed": sum(1 for order in orders if order.status == OrderStatus.CLOSED),
+    }
+
+
+def _build_money_summary(*, store: OrderStore, orders: list[Order]) -> dict[str, int]:
+    requested = 0
+    confirmed = 0
+    ledgers = 0
+    for order in orders:
+        ledger = load_payment_ledger(store=store, order=order)
+        if ledger.get("events"):
+            ledgers += 1
+        requested += int(ledger.get("requested_amount_rub") or 0)
+        confirmed += int(ledger.get("confirmed_amount_rub") or 0)
+    return {
+        "requested_amount_rub": requested,
+        "confirmed_amount_rub": confirmed,
+        "orders_with_ledger": ledgers,
+    }
+
+
+def _format_rub(amount: int) -> str:
+    return f"{amount:,.0f}".replace(",", " ") + " ₽"

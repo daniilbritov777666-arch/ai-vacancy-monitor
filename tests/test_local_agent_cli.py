@@ -30,6 +30,7 @@ from vacancy_monitor.job_queue import AgentJobQueue, JobStatus
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import CustomerContact, OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
+from vacancy_monitor.payment_channel import load_payment_ledger
 from vacancy_monitor.quality import AIQualityReview
 from vacancy_monitor.public_sources import PublicSourceHealth
 
@@ -484,6 +485,70 @@ def test_queue_worker_completes_job_for_already_advanced_order(tmp_path):
 
     assert client.orders == []
     assert queue.counts() == {"succeeded": 1}
+
+
+def test_queue_reopens_dead_pending_order_after_restart(tmp_path):
+    config = queued_config(tmp_path)
+    store = OrderStore(config.orders_path)
+    order = make_order_from_post(queue_test_post(), category="Telegram-боты")
+    store.save_order(order)
+    queue = AgentJobQueue(config.agent_queue_path)
+    job = queue.enqueue(
+        order_id=order.order_id,
+        kind="advance_order",
+        payload={"version": 1},
+        idempotency_key=f"advance_order:{order.order_id}",
+        max_attempts=4,
+        now=datetime.now(tz=UTC),
+    )
+    claimed = queue.claim_next(lease_seconds=600, now=datetime.now(tz=UTC))
+    assert claimed is not None
+    queue.fail(claimed.job_id, ValueError("old parser error"), now=datetime.now(tz=UTC))
+    client = FakeAutopilotClient(safe_autopilot_result())
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=client,
+    )
+
+    assert AgentJobQueue(config.agent_queue_path).get(job.job_id).status == JobStatus.SUCCEEDED
+    assert store.load_order(order.order_id).status == OrderStatus.DRAFT_READY
+
+
+def test_queue_skips_stale_pending_order_before_ai_call(tmp_path):
+    config = replace(queued_config(tmp_path), auto_outreach_max_age_hours=24)
+    store = OrderStore(config.orders_path)
+    order = replace(
+        make_order_from_post(queue_test_post(), category="Telegram-боты"),
+        created_at="01.01.2020 00:00 МСК",
+        updated_at="01.01.2020 00:00 МСК",
+    )
+    store.save_order(order)
+    queue = AgentJobQueue(config.agent_queue_path)
+    queue.enqueue(
+        order_id=order.order_id,
+        kind="advance_order",
+        payload={"version": 1},
+        idempotency_key=f"advance_order:{order.order_id}",
+        max_attempts=4,
+        now=datetime.now(tz=UTC),
+    )
+    client = FakeAutopilotClient(safe_autopilot_result())
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=client,
+    )
+
+    assert client.orders == []
+    assert store.load_order(order.order_id).status == OrderStatus.SKIPPED
+    assert AgentJobQueue(config.agent_queue_path).counts() == {"succeeded": 1}
 
 
 class FakeFreelancehuntConversationClient:
@@ -1813,6 +1878,11 @@ def test_run_local_agent_closes_payment_requested_order_when_winning_project_is_
 
     assert store.load_order(order.order_id).status == OrderStatus.CLOSED
     assert (store.order_dir(order.order_id) / "payment" / "freelancehunt_bid.json").exists()
+    ledger = load_payment_ledger(store=store, order=order)
+    assert ledger["current_status"] == "confirmed"
+    assert ledger["confirmed_amount_rub"] == 15000
+    assert ledger["events"][-1]["event"] == "payment_confirmed"
+    assert ledger["events"][-1]["provider"] == "freelancehunt_safe"
     assert any("Проект завершен на Freelancehunt" in message for message, _ in sent)
 
 
@@ -2088,6 +2158,7 @@ def test_run_local_agent_sends_status_report_with_live_api_audit(tmp_path):
     assert "payment_requested: 1" in reports[-1]
     assert (config.orders_path / "reports" / "freelancehunt_live_api_audit.json").exists()
     assert (config.orders_path / "reports" / "status_report_state.json").exists()
+    assert (store.order_dir(order.order_id) / "order_run_report.json").exists()
 
 
 def test_run_local_agent_skips_status_report_until_interval_passes(tmp_path):

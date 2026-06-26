@@ -91,6 +91,27 @@ def test_fail_moves_job_to_dead(tmp_path):
     assert queue.claim_next(lease_seconds=600, now=NOW) is None
 
 
+def test_reopen_dead_job_returns_it_to_pending(tmp_path):
+    queue = AgentJobQueue(tmp_path / "jobs.sqlite3")
+    enqueue_order(queue)
+    claimed = queue.claim_next(lease_seconds=600, now=NOW)
+    assert claimed is not None
+    queue.fail(claimed.job_id, ValueError("invalid payload"), now=NOW)
+
+    reopened = queue.reopen_dead(
+        idempotency_key="advance_order:order-1",
+        max_attempts=4,
+        now=NOW + timedelta(minutes=5),
+    )
+
+    assert reopened is not None
+    assert reopened.job_id == claimed.job_id
+    assert reopened.status == JobStatus.PENDING
+    assert reopened.attempts == 0
+    assert reopened.last_error_type is None
+    assert queue.claim_next(lease_seconds=600, now=NOW + timedelta(minutes=5)) is not None
+
+
 def test_release_expired_leases_returns_job_to_pending(tmp_path):
     queue = AgentJobQueue(tmp_path / "jobs.sqlite3")
     enqueue_order(queue)
