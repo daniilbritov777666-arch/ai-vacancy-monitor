@@ -1332,6 +1332,14 @@ def _maybe_process_revision_request(
         delivery_text = package.delivery_message_ru
         response_payload = send_delivery(order, delivery_text)
         _write_revision_sent_record(revision_dir=revision_dir, text=delivery_text, response_payload=response_payload)
+        _write_revision_summary_event(
+            store=store,
+            order=order,
+            thread=thread,
+            status="sent",
+            text=revision_text,
+            revision_dir_name=revision_dir.name,
+        )
     except Exception as exc:
         _write_revision_manual_review_required(
             store=store,
@@ -1376,6 +1384,8 @@ def _auto_revision_block_reason(
         return "нет AI-клиента для подготовки правок"
     if send_delivery is None:
         return "нет подключенного канала отправки правок"
+    if _auto_revision_count_for_order(store=store, order=order) >= config.auto_revision_per_order_limit:
+        return "лимит правок по заказу исчерпан"
     if _auto_revision_count_today(store) >= config.auto_revision_daily_limit:
         return "дневной лимит автоправок исчерпан"
     combined_text = "\n".join(message.text for message in messages if message.text).lower()
@@ -1395,6 +1405,11 @@ def _auto_revision_count_today(store: OrderStore) -> int:
         except OSError:
             continue
     return count
+
+
+def _auto_revision_count_for_order(*, store: OrderStore, order: Order) -> int:
+    revisions_dir = store.order_dir(order.order_id) / "revisions"
+    return len(list(revisions_dir.glob("revision-*/delivery_message.sent.json")))
 
 
 def _write_revision_package(
@@ -1447,6 +1462,47 @@ def _write_revision_sent_record(*, revision_dir, text: str, response_payload) ->
     )
 
 
+def _write_revision_summary_event(
+    *,
+    store: OrderStore,
+    order: Order,
+    thread: FreelancehuntThread,
+    status: str,
+    reason: str = "",
+    text: str = "",
+    revision_dir_name: str | None = None,
+) -> None:
+    revisions_dir = store.order_dir(order.order_id) / "revisions"
+    revisions_dir.mkdir(parents=True, exist_ok=True)
+    path = revisions_dir / "summary.json"
+    try:
+        summary = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        summary = {}
+    events = list(summary.get("events", []))
+    event = {
+        "created_at": format_moscow_time(),
+        "status": status,
+        "thread_id": thread.thread_id,
+        "project_id": thread.project_id,
+        "reason": reason,
+        "request": text,
+    }
+    if revision_dir_name:
+        event["revision_dir"] = revision_dir_name
+    events.append(event)
+    summary = {
+        "order_id": order.order_id,
+        "sent_count": _auto_revision_count_for_order(store=store, order=order),
+        "blocked_count": sum(1 for item in events if item.get("status") == "blocked"),
+        "latest_status": status,
+        "latest_reason": reason,
+        "updated_at": format_moscow_time(),
+        "events": events,
+    }
+    path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _write_revision_manual_review_required(
     *,
     store: OrderStore,
@@ -1472,6 +1528,7 @@ def _write_revision_manual_review_required(
         + "\n",
         encoding="utf-8",
     )
+    _write_revision_summary_event(store=store, order=order, thread=thread, status="blocked", reason=reason, text=text)
 
 
 def _auto_reply_block_reason(

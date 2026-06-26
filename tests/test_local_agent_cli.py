@@ -2058,6 +2058,12 @@ def test_run_local_agent_auto_processes_revision_request_after_delivery(tmp_path
     assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
     assert ("thread-1", "Здравствуйте! Внес правки и отправляю обновленную версию.") in conversation_client.thread_messages
     assert list((store.order_dir(order.order_id) / "revisions").glob("*/delivery_message.sent.json"))
+    revision_summary = json.loads(
+        (store.order_dir(order.order_id) / "revisions" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert revision_summary["sent_count"] == 1
+    assert revision_summary["blocked_count"] == 0
+    assert revision_summary["latest_status"] == "sent"
     assert any("Правки автоматически внесены" in message for message, _ in sent)
 
 
@@ -2160,6 +2166,81 @@ def test_run_local_agent_blocks_unsafe_revision_request(tmp_path):
     assert conversation_client.thread_messages == []
     assert execution_client.calls == []
     assert (store.order_dir(order.order_id) / "revisions" / "manual_review_required.json").exists()
+    revision_summary = json.loads(
+        (store.order_dir(order.order_id) / "revisions" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert revision_summary["sent_count"] == 0
+    assert revision_summary["blocked_count"] == 1
+    assert revision_summary["latest_status"] == "blocked"
+    assert "опасный маркер" in revision_summary["latest_reason"]
+    assert any("Автоправка заблокирована" in message for message, _ in sent)
+
+
+def test_run_local_agent_blocks_revision_when_per_order_limit_exhausted(tmp_path):
+    sent = []
+    revision_message = FreelancehuntThreadMessage(
+        message_id="msg-revision-limit",
+        text="Нужно еще раз поправить текст и отправить обновленную версию.",
+        created_at="2026-06-15T10:00:00+03:00",
+        author_id="client-1",
+        author_type="employer",
+        is_own=False,
+        raw={"id": "msg-revision-limit"},
+    )
+    conversation_client = FakeFreelancehuntConversationClient(messages=[revision_message])
+    execution_client = FakeExecutionDraftClient(delivery_message="Не должно отправиться.")
+    config = replace(
+        make_config(tmp_path),
+        auto_conversation_enabled=True,
+        auto_revision_enabled=True,
+        auto_revision_per_order_limit=1,
+        auto_delivery_enabled=True,
+        auto_execution_enabled=True,
+        auto_execution_draft_enabled=True,
+        freelancehunt_api_token="fh-token",
+        openai_api_key="sk-test",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), status=OrderStatus.PAYMENT_REQUESTED)
+    store.save_order(order)
+    sent_revision_dir = store.order_dir(order.order_id) / "revisions" / "revision-001"
+    sent_revision_dir.mkdir(parents=True)
+    (sent_revision_dir / "delivery_message.sent.json").write_text(
+        json.dumps({"sent_at": "15.06.2026 09:00 МСК", "message": "v1"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    assert conversation_client.thread_messages == []
+    assert execution_client.calls == []
+    manual_review = json.loads(
+        (store.order_dir(order.order_id) / "revisions" / "manual_review_required.json").read_text(encoding="utf-8")
+    )
+    assert "лимит правок по заказу исчерпан" in manual_review["reason"]
+    revision_summary = json.loads(
+        (store.order_dir(order.order_id) / "revisions" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert revision_summary["sent_count"] == 1
+    assert revision_summary["blocked_count"] == 1
+    assert revision_summary["latest_status"] == "blocked"
+    assert "лимит правок по заказу исчерпан" in revision_summary["latest_reason"]
     assert any("Автоправка заблокирована" in message for message, _ in sent)
 
 
