@@ -367,9 +367,27 @@ def _parse_autopilot_result(raw_text: str) -> AutopilotResult:
         "customer_message_ru",
     ):
         payload[field] = _normalize_text(payload.get(field, ""))
-    payload["price_rub"] = int(payload.get("price_rub") or 0)
+    payload["price_rub"] = _coerce_price_rub(payload.get("price_rub"))
     payload["safe_to_autopilot"] = bool(payload.get("safe_to_autopilot"))
     return AutopilotResult(**payload)
+
+
+def _coerce_price_rub(value: object) -> int:
+    if value is None or value == "":
+        return 0
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, float):
+        return max(0, int(value))
+    text = str(value).lower().replace("\xa0", " ").strip()
+    for match in re.finditer(r"\d[\d\s.,]*", text):
+        raw = match.group(0)
+        amount = int(re.sub(r"\D", "", raw) or "0")
+        if amount >= 100:
+            return amount
+    return 0
 
 
 def _parse_execution_package(raw_text: str) -> ExecutionDraftPackage:

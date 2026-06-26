@@ -5,6 +5,7 @@ import requests
 from vacancy_monitor.autopilot import (
     AutopilotResult,
     OpenAIResponsesClient,
+    _parse_autopilot_result,
     run_order_autopilot,
 )
 from vacancy_monitor.execution import ExecutionDraftPackage
@@ -104,6 +105,24 @@ def safe_chat_payload():
         "customer_message_ru": "Здравствуйте! Подготовил план и могу приступить.",
     }
     return {"choices": [{"message": {"content": json.dumps(data, ensure_ascii=False)}}]}
+
+
+def test_parse_autopilot_result_coerces_text_price_range():
+    data = {
+        "safe_to_autopilot": True,
+        "risk_flags": [],
+        "summary_ru": "Нужна обработка лидов.",
+        "outreach_ru": "Здравствуйте! Готов обсудить задачу.",
+        "execution_plan_ru": "Уточнить ТЗ и выполнить работу.",
+        "price_rub": "примерно 25,000 - 28,000 RUB/мес.; ставка 15% от оплаты услуг клиента.",
+        "deadline_ru": "2 дня",
+        "deliverable_markdown": "# Черновик",
+        "customer_message_ru": "Здравствуйте! Готов приступить.",
+    }
+
+    result = _parse_autopilot_result(json.dumps(data, ensure_ascii=False))
+
+    assert result.price_rub == 25000
 
 
 def execution_payload():
