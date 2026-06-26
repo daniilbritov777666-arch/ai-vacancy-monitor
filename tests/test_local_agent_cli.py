@@ -1554,6 +1554,7 @@ def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
     assert receipt["channel"] == "freelancehunt"
     assert receipt["delivery_mode"] == "thread_message"
     assert receipt["attachment_supported"] is False
+    assert receipt["archive"] == "outbox/delivery_package.zip"
     assert receipt["quality"]["passed"] is True
     assert "execution/generated/bot.py" in receipt["generated_files"]
     assert not (store.order_dir(order.order_id) / "outbox" / "delivery_approval_requested.json").exists()

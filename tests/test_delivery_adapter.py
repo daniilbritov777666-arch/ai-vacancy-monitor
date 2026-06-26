@@ -1,4 +1,5 @@
 import json
+import zipfile
 from dataclasses import replace
 
 from vacancy_monitor.delivery_adapter import build_delivery_payload
@@ -37,6 +38,14 @@ def test_build_delivery_payload_for_freelancehunt_thread_adds_package_note(tmp_p
     assert "execution/generated/parser.py" in payload.generated_files
     assert payload.manifest_path == "outbox/delivery_package_manifest.json"
     assert payload.fallback_path == "outbox/delivery_fallback.md"
+    assert payload.archive_path == "outbox/delivery_package.zip"
+    archive_path = store.order_dir(order.order_id) / payload.archive_path
+    assert archive_path.exists()
+    with zipfile.ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+    assert "execution/generated/parser.py" in names
+    assert "outbox/delivery_message.md" in names
+    assert "outbox/delivery_package_manifest.json" in names
 
 
 def test_build_delivery_payload_for_email_uses_email_message_mode(tmp_path):

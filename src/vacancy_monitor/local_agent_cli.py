@@ -2419,6 +2419,7 @@ def _write_delivery_sent_record(
         "channel": _delivery_channel(order),
         "delivery_mode": delivery_payload.delivery_mode if delivery_payload else "manual_message",
         "attachment_supported": delivery_payload.attachment_supported if delivery_payload else False,
+        "archive": delivery_payload.archive_path if delivery_payload else None,
         "instructions_ru": delivery_payload.instructions_ru if delivery_payload else None,
         "message": text,
         "generated_files": _generated_file_list(store=store, order=order),

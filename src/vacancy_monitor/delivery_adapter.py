@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from dataclasses import asdict, dataclass
 
 from vacancy_monitor.order_models import Order, format_moscow_time
@@ -16,6 +17,7 @@ class DeliveryPayload:
     generated_files: list[str]
     manifest_path: str
     fallback_path: str
+    archive_path: str
     instructions_ru: str
 
     def to_dict(self) -> dict:
@@ -24,17 +26,21 @@ class DeliveryPayload:
 
 def build_delivery_payload(*, store: OrderStore, order: Order, message_text: str) -> DeliveryPayload:
     order_dir = store.order_dir(order.order_id)
+    payload_text = _with_package_note(message_text)
+    _write_delivery_message(store=store, order=order, message_text=payload_text)
     manifest_path = _write_delivery_package_manifest(store=store, order=order)
     fallback_path = order_dir / "outbox" / "delivery_fallback.md"
+    archive_path = _write_delivery_archive(store=store, order=order, manifest_path=manifest_path)
     channel = _delivery_channel(order)
     payload = DeliveryPayload(
         channel=channel,
         delivery_mode=_delivery_mode(channel),
         attachment_supported=False,
-        message_text=_with_package_note(message_text),
+        message_text=payload_text,
         generated_files=_generated_file_list(store=store, order=order),
         manifest_path=manifest_path.relative_to(order_dir).as_posix(),
         fallback_path=fallback_path.relative_to(order_dir).as_posix(),
+        archive_path=archive_path.relative_to(order_dir).as_posix(),
         instructions_ru=(
             "Канал доставки сейчас отправляет текстовое сообщение. "
             "Файлы результата подготовлены в локальном пакете заказа; если площадка не поддерживает вложения, "
@@ -42,6 +48,12 @@ def build_delivery_payload(*, store: OrderStore, order: Order, message_text: str
         ),
     )
     return payload
+
+
+def _write_delivery_message(*, store: OrderStore, order: Order, message_text: str) -> None:
+    outbox_dir = store.order_dir(order.order_id) / "outbox"
+    outbox_dir.mkdir(parents=True, exist_ok=True)
+    (outbox_dir / "delivery_message.md").write_text(message_text.strip() + "\n", encoding="utf-8")
 
 
 def _with_package_note(message_text: str) -> str:
@@ -105,6 +117,7 @@ def _write_delivery_package_manifest(*, store: OrderStore, order: Order):
         "order_id": order.order_id,
         "generated_files": _generated_file_list(store=store, order=order),
         "delivery_message": "outbox/delivery_message.md",
+        "archive": "outbox/delivery_package.zip",
         "quality": _delivery_quality_summary(store=store, order=order),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -117,3 +130,17 @@ def _write_delivery_package_manifest(*, store: OrderStore, order: Order):
         encoding="utf-8",
     )
     return path
+
+
+def _write_delivery_archive(*, store: OrderStore, order: Order, manifest_path):
+    order_dir = store.order_dir(order.order_id)
+    outbox_dir = order_dir / "outbox"
+    archive_path = outbox_dir / "delivery_package.zip"
+    delivery_message_path = outbox_dir / "delivery_message.md"
+    with zipfile.ZipFile(archive_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for relative_path in _generated_file_list(store=store, order=order):
+            archive.write(order_dir / relative_path, relative_path)
+        if delivery_message_path.exists():
+            archive.write(delivery_message_path, delivery_message_path.relative_to(order_dir).as_posix())
+        archive.write(manifest_path, manifest_path.relative_to(order_dir).as_posix())
+    return archive_path
