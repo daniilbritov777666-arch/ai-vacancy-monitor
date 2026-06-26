@@ -42,7 +42,12 @@ class AIQualityReview:
     repair_instructions_ru: str
 
 
-def check_generated_package(generated_dir: Path, *, delivery_message: str | None = None) -> QualityReport:
+def check_generated_package(
+    generated_dir: Path,
+    *,
+    delivery_message: str | None = None,
+    task_category: str | None = None,
+) -> QualityReport:
     if not generated_dir.is_dir():
         return _report([QualityIssue("no_generated_files", "Папка результата отсутствует.")])
 
@@ -60,6 +65,7 @@ def check_generated_package(generated_dir: Path, *, delivery_message: str | None
     has_readme = any(path.name.lower().startswith("readme") for path in files)
     if has_code and not has_readme:
         issues.append(QualityIssue("missing_readme", "Для программного результата отсутствует README с запуском."))
+    issues.extend(_check_category_deliverables(files=deliverable_files, generated_dir=generated_dir, task_category=task_category))
 
     for path in files:
         relative = path.relative_to(generated_dir).as_posix()
@@ -81,6 +87,61 @@ def check_generated_package(generated_dir: Path, *, delivery_message: str | None
         issues.extend(_check_text(path=path, relative=relative, text=text))
 
     return _report(issues)
+
+
+def _check_category_deliverables(*, files: list[Path], generated_dir: Path, task_category: str | None) -> list[QualityIssue]:
+    category = (task_category or "").lower()
+    if not category:
+        return []
+    if "таблиц" in category or "дашборд" in category:
+        return _check_spreadsheet_deliverables(files=files, generated_dir=generated_dir)
+    if "текст" in category or "контент" in category:
+        return _check_text_deliverables(files=files, generated_dir=generated_dir)
+    return []
+
+
+def _check_spreadsheet_deliverables(*, files: list[Path], generated_dir: Path) -> list[QualityIssue]:
+    issues: list[QualityIssue] = []
+    structured_suffixes = {".csv", ".xlsx", ".xls", ".json"}
+    structured_files = [path for path in files if path.suffix.lower() in structured_suffixes]
+    if not structured_files:
+        return [
+            QualityIssue(
+                "spreadsheet_deliverable_missing",
+                "Для таблиц/дашбордов нужен структурированный файл результата: CSV, XLSX, XLS или JSON.",
+            )
+        ]
+    for path in structured_files:
+        relative = path.relative_to(generated_dir).as_posix()
+        if path.suffix.lower() == ".csv":
+            try:
+                rows = list(csv.reader(io.StringIO(path.read_text(encoding="utf-8")), strict=True))
+            except (OSError, UnicodeDecodeError, csv.Error) as exc:
+                issues.append(QualityIssue("invalid_csv", f"Ошибка формата: {exc}.", relative))
+                continue
+            if len(rows) < 2:
+                issues.append(QualityIssue("spreadsheet_too_few_rows", "CSV должен содержать заголовок и строки данных.", relative))
+    return issues
+
+
+def _check_text_deliverables(*, files: list[Path], generated_dir: Path) -> list[QualityIssue]:
+    text_files = [
+        path for path in files
+        if path.suffix.lower() in {".md", ".txt"} and not path.name.lower().startswith(("readme", "summary"))
+    ]
+    if not text_files:
+        return [QualityIssue("text_deliverable_missing", "Для текстовой задачи нужен отдельный MD/TXT файл результата.")]
+    issues: list[QualityIssue] = []
+    for path in text_files:
+        relative = path.relative_to(generated_dir).as_posix()
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        words = re.findall(r"\w+", text, flags=re.UNICODE)
+        if len(words) < 40:
+            issues.append(QualityIssue("text_deliverable_too_short", "Текстовый результат слишком короткий для сдачи заказчику.", relative))
+    return issues
 
 
 def _check_text(*, path: Path, relative: str, text: str) -> list[QualityIssue]:

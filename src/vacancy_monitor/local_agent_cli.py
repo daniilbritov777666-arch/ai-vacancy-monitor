@@ -1751,6 +1751,7 @@ def _run_delivery_quality_gate(
         local_report = check_generated_package(
             store.order_dir(order.order_id) / "execution" / "generated",
             delivery_message=package.delivery_message_ru,
+            task_category=order.category,
         )
         ai_review: AIQualityReview | None = None
         ai_error: str | None = None

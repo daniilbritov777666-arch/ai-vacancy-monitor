@@ -1737,6 +1737,32 @@ def test_quality_gate_repairs_local_failure_then_sends(tmp_path):
     assert conversation_client.thread_messages == [("thread-1", "Отправляю исправленный результат.")]
 
 
+def test_quality_gate_repairs_spreadsheet_package_without_structured_file(tmp_path):
+    conversation_client = FakeFreelancehuntConversationClient()
+    execution_client = FakeQualityExecutionClient(
+        initial_files={"README.md": "# Дашборд\n\nПодготовлено описание результата.\n"},
+        repaired_files={"report.csv": "metric,value\nleads,12\nsales,3\n"},
+    )
+    config, store, order = _quality_delivery_setup(tmp_path)
+    order = replace(order, category="Таблицы и дашборды")
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        freelancehunt_client=conversation_client,
+        execution_draft_client=execution_client,
+    )
+
+    latest = json.loads((store.order_dir(order.order_id) / "quality" / "attempt-001.json").read_text(encoding="utf-8"))
+    assert any(issue["code"] == "spreadsheet_deliverable_missing" for issue in latest["local"]["issues"])
+    assert len(execution_client.repair_calls) == 1
+    assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
+    assert conversation_client.thread_messages == [("thread-1", "Отправляю исправленный результат.")]
+
+
 def test_quality_gate_fails_after_two_repairs_without_manual_approval(tmp_path):
     sent = []
     conversation_client = FakeFreelancehuntConversationClient()

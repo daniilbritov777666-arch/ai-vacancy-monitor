@@ -71,3 +71,29 @@ def test_summary_without_deliverable_and_empty_delivery_message_fail(tmp_path):
     report = check_generated_package(tmp_path, delivery_message="")
 
     assert {issue.code for issue in report.issues} >= {"no_deliverable_files", "empty_delivery_message"}
+
+
+def test_content_category_requires_substantial_text_deliverable(tmp_path):
+    _write(tmp_path, "result.txt", "Короткий черновик.\n")
+
+    report = check_generated_package(tmp_path, task_category="Тексты/контент")
+
+    assert report.passed is False
+    assert any(issue.code == "text_deliverable_too_short" and issue.path == "result.txt" for issue in report.issues)
+
+
+def test_spreadsheet_category_requires_structured_deliverable(tmp_path):
+    _write(tmp_path, "README.md", "# Описание\n\nТаблица подготовлена.\n")
+
+    report = check_generated_package(tmp_path, task_category="Таблицы и дашборды")
+
+    assert report.passed is False
+    assert any(issue.code == "spreadsheet_deliverable_missing" for issue in report.issues)
+
+
+def test_spreadsheet_category_accepts_csv_with_header_and_data(tmp_path):
+    _write(tmp_path, "report.csv", "metric,value\nleads,12\nsales,3\n")
+
+    report = check_generated_package(tmp_path, task_category="Таблицы и дашборды")
+
+    assert report.passed is True
