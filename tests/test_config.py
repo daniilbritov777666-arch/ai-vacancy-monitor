@@ -200,6 +200,7 @@ def test_delivery_public_link_config_reads_env(monkeypatch, tmp_path):
     monkeypatch.setenv("DELIVERY_GATEWAY_ENABLED", "true")
     monkeypatch.setenv("DELIVERY_GATEWAY_HOST", "127.0.0.1")
     monkeypatch.setenv("DELIVERY_GATEWAY_PORT", "8787")
+    monkeypatch.setenv("DELIVERY_TUNNEL_ENABLED", "true")
 
     config = Config.from_env()
 
@@ -208,6 +209,7 @@ def test_delivery_public_link_config_reads_env(monkeypatch, tmp_path):
     assert config.delivery_gateway_enabled is True
     assert config.delivery_gateway_host == "127.0.0.1"
     assert config.delivery_gateway_port == 8787
+    assert config.delivery_tunnel_enabled is True
 
 
 def test_imap_config_reads_env(monkeypatch):
