@@ -1543,11 +1543,17 @@ def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
 
     updated = store.load_order(order.order_id)
     assert updated.status == OrderStatus.PAYMENT_REQUESTED
-    assert ("thread-1", "Отправляю готовый результат.") in conversation_client.thread_messages
+    assert conversation_client.thread_messages
+    thread_id, sent_text = conversation_client.thread_messages[-1]
+    assert thread_id == "thread-1"
+    assert "Отправляю готовый результат." in sent_text
+    assert "Пакет результата" in sent_text
     assert (store.order_dir(order.order_id) / "outbox" / "delivery_message.sent.json").exists()
     receipt = json.loads((store.order_dir(order.order_id) / "outbox" / "delivery_receipt.json").read_text(encoding="utf-8"))
     assert receipt["status"] == "sent"
     assert receipt["channel"] == "freelancehunt"
+    assert receipt["delivery_mode"] == "thread_message"
+    assert receipt["attachment_supported"] is False
     assert receipt["quality"]["passed"] is True
     assert "execution/generated/bot.py" in receipt["generated_files"]
     assert not (store.order_dir(order.order_id) / "outbox" / "delivery_approval_requested.json").exists()
@@ -1581,6 +1587,7 @@ def test_auto_delivery_appends_static_payment_request_for_email_order(tmp_path):
     assert delivered
     assert "Платежный канал" in delivered[0][1]
     assert "Оплата переводом на карту РФ" in delivered[0][1]
+    assert "Пакет результата" in delivered[0][1]
     assert "Результат автоматически отправлен заказчику" in sent[-1][0]
 
 
@@ -1655,7 +1662,10 @@ def test_quality_gate_sends_package_that_passes_local_and_ai_checks(tmp_path):
     assert len(execution_client.review_calls) == 1
     assert execution_client.repair_calls == []
     assert (store.order_dir(order.order_id) / "quality" / "latest.json").exists()
-    assert conversation_client.thread_messages == [("thread-1", "Отправляю готовый результат.")]
+    assert conversation_client.thread_messages
+    assert conversation_client.thread_messages[-1][0] == "thread-1"
+    assert "Отправляю готовый результат." in conversation_client.thread_messages[-1][1]
+    assert "Пакет результата" in conversation_client.thread_messages[-1][1]
 
 
 def _verification_report(status, issues=()):
@@ -1746,7 +1756,10 @@ def test_quality_gate_repairs_local_failure_then_sends(tmp_path):
     assert len(execution_client.repair_calls) == 1
     generated = store.order_dir(order.order_id) / "execution" / "generated"
     assert (generated / "README.md").exists()
-    assert conversation_client.thread_messages == [("thread-1", "Отправляю исправленный результат.")]
+    assert conversation_client.thread_messages
+    assert conversation_client.thread_messages[-1][0] == "thread-1"
+    assert "Отправляю исправленный результат." in conversation_client.thread_messages[-1][1]
+    assert "Пакет результата" in conversation_client.thread_messages[-1][1]
 
 
 def test_quality_gate_repairs_spreadsheet_package_without_structured_file(tmp_path):
@@ -1772,7 +1785,10 @@ def test_quality_gate_repairs_spreadsheet_package_without_structured_file(tmp_pa
     assert any(issue["code"] == "spreadsheet_deliverable_missing" for issue in latest["local"]["issues"])
     assert len(execution_client.repair_calls) == 1
     assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
-    assert conversation_client.thread_messages == [("thread-1", "Отправляю исправленный результат.")]
+    assert conversation_client.thread_messages
+    assert conversation_client.thread_messages[-1][0] == "thread-1"
+    assert "Отправляю исправленный результат." in conversation_client.thread_messages[-1][1]
+    assert "Пакет результата" in conversation_client.thread_messages[-1][1]
 
 
 def test_quality_gate_uses_task_route_for_dashboard_requirements(tmp_path):
@@ -2416,7 +2432,10 @@ def test_handle_order_callback_sends_delivery_when_allowed(tmp_path):
 
     assert updated is not None
     assert updated.status == OrderStatus.PAYMENT_REQUESTED
-    assert delivered == [(order.order_id, "Здравствуйте! Результат готов к проверке.")]
+    assert delivered
+    assert delivered[0][0] == order.order_id
+    assert "Здравствуйте! Результат готов к проверке." in delivered[0][1]
+    assert "Пакет результата" in delivered[0][1]
     assert answers == ["Результат отправлен заказчику."]
 
 
@@ -2497,7 +2516,10 @@ def test_poll_telegram_once_routes_delivery_callback(tmp_path):
 
     assert next_offset == 101
     assert store.load_order(order.order_id).status == OrderStatus.PAYMENT_REQUESTED
-    assert delivered == [(order.order_id, "Результат готов.")]
+    assert delivered
+    assert delivered[0][0] == order.order_id
+    assert "Результат готов." in delivered[0][1]
+    assert "Пакет результата" in delivered[0][1]
     assert answers == [("callback-1", "Результат отправлен заказчику.")]
 
 

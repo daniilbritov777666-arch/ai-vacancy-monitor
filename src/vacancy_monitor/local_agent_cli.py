@@ -21,6 +21,7 @@ from vacancy_monitor.conversation import (
     write_thread_reply_sent_record,
 )
 from vacancy_monitor.customer_intent import CustomerIntent, classify_customer_messages
+from vacancy_monitor.delivery_adapter import DeliveryPayload, build_delivery_payload
 from vacancy_monitor.execution import (
     ExecutionDraftPackage,
     prepare_execution_workspace,
@@ -1716,14 +1717,20 @@ def _maybe_finalize_delivery(
     delivery_text = _read_delivery_text(store, order)
     try:
         delivery_text = _append_payment_request_if_needed(store=store, order=order, config=config, text=delivery_text)
-        send_delivery(order, delivery_text)
+        delivery_payload = build_delivery_payload(store=store, order=order, message_text=delivery_text)
+        send_delivery(order, delivery_payload.message_text)
     except Exception as exc:
         _safe_notify(sender, f"Результат по заказу {order.order_id} не отправлен автоматически: {type(exc).__name__}.")
         _maybe_request_delivery_approval(store=store, order=order, sender=sender)
         return
 
     updated = store.update_status(order.order_id, OrderStatus.PAYMENT_REQUESTED)
-    _write_delivery_sent_record(store=store, order=updated, text=delivery_text)
+    _write_delivery_sent_record(
+        store=store,
+        order=updated,
+        text=delivery_payload.message_text,
+        delivery_payload=delivery_payload,
+    )
     channel_label = "email" if order.contact and order.contact.channel == "email" else "Freelancehunt"
     _safe_notify(
         sender,
@@ -2363,12 +2370,18 @@ def _approve_delivery(
         answer("Готово. Отправь результат вручную.")
         return updated
     try:
-        send_delivery(order, delivery_text)
+        delivery_payload = build_delivery_payload(store=store, order=order, message_text=delivery_text)
+        send_delivery(order, delivery_payload.message_text)
     except Exception as exc:
         answer(f"Результат не отправлен: {type(exc).__name__}.")
         return order
     updated = store.update_status(order.order_id, OrderStatus.PAYMENT_REQUESTED)
-    _write_delivery_sent_record(store=store, order=updated, text=delivery_text)
+    _write_delivery_sent_record(
+        store=store,
+        order=updated,
+        text=delivery_payload.message_text,
+        delivery_payload=delivery_payload,
+    )
     answer("Результат отправлен заказчику.")
     return updated
 
@@ -2382,7 +2395,13 @@ def _read_delivery_text(store: OrderStore, order: Order) -> str:
     return "Здравствуйте! Подготовил результат, прошу проверить."
 
 
-def _write_delivery_sent_record(*, store: OrderStore, order: Order, text: str) -> None:
+def _write_delivery_sent_record(
+    *,
+    store: OrderStore,
+    order: Order,
+    text: str,
+    delivery_payload: DeliveryPayload | None = None,
+) -> None:
     order_dir = store.order_dir(order.order_id)
     outbox_dir = order_dir / "outbox"
     outbox_dir.mkdir(parents=True, exist_ok=True)
@@ -2398,6 +2417,9 @@ def _write_delivery_sent_record(*, store: OrderStore, order: Order, text: str) -
         "sent_at": sent_at,
         "order_id": order.order_id,
         "channel": _delivery_channel(order),
+        "delivery_mode": delivery_payload.delivery_mode if delivery_payload else "manual_message",
+        "attachment_supported": delivery_payload.attachment_supported if delivery_payload else False,
+        "instructions_ru": delivery_payload.instructions_ru if delivery_payload else None,
         "message": text,
         "generated_files": _generated_file_list(store=store, order=order),
         "quality": _delivery_quality_summary(store=store, order=order),
