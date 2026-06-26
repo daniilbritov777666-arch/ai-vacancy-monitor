@@ -4,6 +4,7 @@ import hashlib
 import smtplib
 import ssl
 from email.message import EmailMessage
+from pathlib import Path
 from typing import Callable
 
 from vacancy_monitor.order_models import Order
@@ -31,7 +32,7 @@ class SMTPOutreachClient:
         self.timeout_seconds = timeout_seconds
         self.smtp_factory = smtp_factory
 
-    def send(self, order: Order, text: str) -> None:
+    def send(self, order: Order, text: str, *, attachments: list[Path] | None = None) -> None:
         if not order.contact or order.contact.channel != "email":
             raise RuntimeError("order has no email contact")
 
@@ -41,6 +42,14 @@ class SMTPOutreachClient:
         message["Subject"] = f"Отклик на проект: {order.category}"
         message["Message-ID"] = self._message_id(order)
         message.set_content(text)
+        for attachment in attachments or []:
+            payload = attachment.read_bytes()
+            message.add_attachment(
+                payload,
+                maintype="application",
+                subtype="zip" if attachment.suffix.lower() == ".zip" else "octet-stream",
+                filename=attachment.name,
+            )
 
         context = ssl.create_default_context()
         if self.use_ssl:

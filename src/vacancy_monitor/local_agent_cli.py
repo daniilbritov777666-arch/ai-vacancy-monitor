@@ -2657,6 +2657,8 @@ def _send_marketplace_delivery(config: Config, order: Order, text: str) -> None:
     if order.contact.channel == "email":
         if not config.smtp_host or not config.smtp_from:
             raise RuntimeError("SMTP_HOST and SMTP_FROM are required")
+        archive_path = config.orders_path / order.order_id / "outbox" / "delivery_package.zip"
+        attachments = [archive_path] if archive_path.exists() else None
         SMTPOutreachClient(
             host=config.smtp_host,
             port=config.smtp_port,
@@ -2664,7 +2666,7 @@ def _send_marketplace_delivery(config: Config, order: Order, text: str) -> None:
             password=config.smtp_password,
             from_email=config.smtp_from,
             use_ssl=config.smtp_use_ssl,
-        ).send(order, text)
+        ).send(order, text, attachments=attachments)
         return
     if order.contact.channel != "freelancehunt":
         raise RuntimeError(f"unsupported contact channel: {order.contact.channel}")

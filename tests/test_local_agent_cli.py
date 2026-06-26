@@ -1592,6 +1592,36 @@ def test_auto_delivery_appends_static_payment_request_for_email_order(tmp_path):
     assert "Результат автоматически отправлен заказчику" in sent[-1][0]
 
 
+def test_marketplace_email_delivery_attaches_package_archive(tmp_path, monkeypatch):
+    sent = []
+    config = replace(
+        make_config(tmp_path),
+        smtp_host="smtp.example.ru",
+        smtp_port=465,
+        smtp_username="robot@example.ru",
+        smtp_password="secret",
+        smtp_from="robot@example.ru",
+        smtp_use_ssl=True,
+    )
+    store = OrderStore(config.orders_path)
+    order = _email_delivery_order(store)
+    archive_path = store.order_dir(order.order_id) / "outbox" / "delivery_package.zip"
+    archive_path.write_bytes(b"zip-content")
+
+    class FakeSMTPOutreachClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def send(self, order, text, *, attachments=None):
+            sent.append((order.order_id, text, attachments))
+
+    monkeypatch.setattr(local_agent_cli, "SMTPOutreachClient", FakeSMTPOutreachClient)
+
+    local_agent_cli._send_marketplace_delivery(config, order, "Результат готов.")
+
+    assert sent == [(order.order_id, "Результат готов.", [archive_path])]
+
+
 def test_auto_delivery_blocks_email_order_without_payment_channel(tmp_path):
     sent = []
     delivered = []
