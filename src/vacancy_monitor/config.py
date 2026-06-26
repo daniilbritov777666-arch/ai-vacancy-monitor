@@ -70,6 +70,9 @@ class Config:
     payment_instructions_ru: str = ""
     delivery_public_base_url: str | None = None
     delivery_public_dir: Path | None = None
+    delivery_gateway_enabled: bool = False
+    delivery_gateway_host: str = "127.0.0.1"
+    delivery_gateway_port: int = 8787
     agent_queue_enabled: bool = False
     agent_queue_path: Path | None = None
     agent_jobs_per_cycle: int = 3
@@ -111,6 +114,9 @@ class Config:
         delivery_public_base_url = os.environ.get("DELIVERY_PUBLIC_BASE_URL", "").strip().rstrip("/") or None
         delivery_public_dir_raw = os.environ.get("DELIVERY_PUBLIC_DIR", "").strip()
         delivery_public_dir = Path(delivery_public_dir_raw) if delivery_public_dir_raw else None
+        delivery_gateway_enabled = _env_bool("DELIVERY_GATEWAY_ENABLED")
+        delivery_gateway_host = os.environ.get("DELIVERY_GATEWAY_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        delivery_gateway_port = int(os.environ.get("DELIVERY_GATEWAY_PORT", "8787"))
         state_path = Path(os.environ.get("STATE_PATH", "data/seen_posts.json"))
         send_first_run = os.environ.get("SEND_FIRST_RUN", "").lower() in {"1", "true", "yes"}
         orders_path = Path(os.environ.get("ORDERS_PATH", "orders"))
@@ -218,6 +224,9 @@ class Config:
             payment_instructions_ru=payment_instructions_ru,
             delivery_public_base_url=delivery_public_base_url,
             delivery_public_dir=delivery_public_dir,
+            delivery_gateway_enabled=delivery_gateway_enabled,
+            delivery_gateway_host=delivery_gateway_host,
+            delivery_gateway_port=delivery_gateway_port,
             agent_queue_enabled=agent_queue_enabled,
             agent_queue_path=agent_queue_path,
             agent_jobs_per_cycle=agent_jobs_per_cycle,

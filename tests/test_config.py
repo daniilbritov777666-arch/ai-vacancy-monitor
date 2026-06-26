@@ -197,11 +197,17 @@ def test_delivery_public_link_config_reads_env(monkeypatch, tmp_path):
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
     monkeypatch.setenv("DELIVERY_PUBLIC_BASE_URL", "https://files.example.ru/freelance/")
     monkeypatch.setenv("DELIVERY_PUBLIC_DIR", str(tmp_path / "public"))
+    monkeypatch.setenv("DELIVERY_GATEWAY_ENABLED", "true")
+    monkeypatch.setenv("DELIVERY_GATEWAY_HOST", "127.0.0.1")
+    monkeypatch.setenv("DELIVERY_GATEWAY_PORT", "8787")
 
     config = Config.from_env()
 
     assert config.delivery_public_base_url == "https://files.example.ru/freelance"
     assert config.delivery_public_dir == tmp_path / "public"
+    assert config.delivery_gateway_enabled is True
+    assert config.delivery_gateway_host == "127.0.0.1"
+    assert config.delivery_gateway_port == 8787
 
 
 def test_imap_config_reads_env(monkeypatch):
