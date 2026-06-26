@@ -1886,6 +1886,61 @@ def test_run_local_agent_closes_payment_requested_order_when_winning_project_is_
     assert any("Проект завершен на Freelancehunt" in message for message, _ in sent)
 
 
+def test_run_local_agent_records_customer_payment_signal_without_closing_order(tmp_path):
+    sent = []
+    conversation_client = FakeFreelancehuntConversationClient(
+        unread=True,
+        messages=[
+            FreelancehuntThreadMessage(
+                message_id="msg-paid",
+                text="Оплатил по СБП, проверьте поступление.",
+                created_at="2026-06-26T10:00:00+03:00",
+                author_id="client-1",
+                author_type="employer",
+                is_own=False,
+                raw={"id": "msg-paid"},
+            )
+        ],
+    )
+    config = replace(
+        make_config(tmp_path),
+        auto_conversation_enabled=True,
+        freelancehunt_api_token="fh-token",
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты", risks=[]),
+        status=OrderStatus.PAYMENT_REQUESTED,
+        price_rub=15000,
+    )
+    store.save_order(order)
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+        freelancehunt_client=conversation_client,
+    )
+
+    updated = store.load_order(order.order_id)
+    assert updated.status == OrderStatus.PAYMENT_REQUESTED
+    ledger = load_payment_ledger(store=store, order=updated)
+    assert ledger["current_status"] == "awaiting_confirmation"
+    assert ledger["events"][-1]["event"] == "payment_signal_received"
+    assert ledger["events"][-1]["amount_rub"] == 15000
+    assert any("Заказчик сообщил об оплате" in message for message, _ in sent)
+
+
 def test_run_local_agent_starts_discovery_when_bid_becomes_winner(tmp_path):
     sent = []
     conversation_client = FakeFreelancehuntConversationClient(

@@ -20,6 +20,7 @@ from vacancy_monitor.conversation import (
     write_thread_reply_draft,
     write_thread_reply_sent_record,
 )
+from vacancy_monitor.customer_intent import CustomerIntent, classify_customer_messages
 from vacancy_monitor.execution import (
     ExecutionDraftPackage,
     prepare_execution_workspace,
@@ -877,6 +878,14 @@ def _sync_freelancehunt_conversations(
         def send_thread_delivery(order: Order, text: str, *, thread_id: str = thread.thread_id) -> None:
             client.add_thread_message(thread_id=thread_id, message_html=text)
 
+        if _maybe_record_customer_payment_signal(
+            store=store,
+            order=updated_order,
+            messages=[message.text for message in messages if not message.is_own and message.text],
+            sender=sender,
+        ):
+            continue
+
         if _maybe_process_revision_request(
             config=config,
             store=store,
@@ -975,6 +984,13 @@ def _sync_email_conversations(
         _safe_notify(sender, build_email_notification(order=updated_order, messages=[message]))
 
         thread_messages = [message.as_thread_message()]
+        if _maybe_record_customer_payment_signal(
+            store=store,
+            order=updated_order,
+            messages=[message.text],
+            sender=sender,
+        ):
+            continue
         _maybe_draft_email_reply(
             store=store,
             order=updated_order,
@@ -994,6 +1010,61 @@ def _sync_email_conversations(
             execution_draft_client=draft_client,
             send_delivery=send_delivery or send_email,
         )
+
+
+def _maybe_record_customer_payment_signal(
+    *,
+    store: OrderStore,
+    order: Order,
+    messages: list[str],
+    sender: Callable[..., None],
+) -> bool:
+    if order.status != OrderStatus.PAYMENT_REQUESTED:
+        return False
+    intent = classify_customer_messages(messages)
+    if intent.intent != CustomerIntent.PAYMENT_SIGNAL:
+        return False
+    ledger = append_payment_ledger_event(
+        store=store,
+        order=order,
+        event="payment_signal_received",
+        provider=order.contact.channel if order.contact else "customer_message",
+        amount_rub=_payment_amount_rub(order),
+        status="awaiting_confirmation",
+    )
+    _write_customer_payment_signal(store=store, order=order, messages=messages, ledger=ledger)
+    _safe_notify(
+        sender,
+        (
+            "Заказчик сообщил об оплате.\n\n"
+            f"ID: {order.order_id}\n"
+            f"Сумма по заказу: {_format_rub(_payment_amount_rub(order))}\n"
+            "Статус: ожидает подтверждения поступления. Заказ не закрыт автоматически без проверяемого сигнала оплаты."
+        ),
+    )
+    return True
+
+
+def _write_customer_payment_signal(*, store: OrderStore, order: Order, messages: list[str], ledger: dict) -> None:
+    path = store.order_dir(order.order_id) / "payment" / "customer_payment_signal.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "created_at": format_moscow_time(),
+                "messages": messages,
+                "ledger_status": ledger.get("current_status"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _format_rub(amount: int) -> str:
+    return f"{amount:,.0f}".replace(",", " ") + " ₽"
 
 
 def _write_email_sync_skipped_report(*, config: Config, reason: str) -> None:
@@ -1286,9 +1357,8 @@ def _maybe_process_revision_request(
 
 
 def _has_revision_request(messages: list[FreelancehuntThreadMessage]) -> bool:
-    text = "\n".join(message.text for message in messages if message.text).lower()
-    markers = ["правк", "поправ", "исправ", "доработ", "передел", "не работает", "ошиб", "замен", "обнов"]
-    return any(marker in text for marker in markers)
+    result = classify_customer_messages([message.text for message in messages if message.text])
+    return result.intent in {CustomerIntent.REVISION_REQUEST, CustomerIntent.RISKY_REQUEST}
 
 
 def _auto_revision_block_reason(

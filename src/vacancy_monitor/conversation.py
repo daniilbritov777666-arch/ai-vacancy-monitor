@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from vacancy_monitor.customer_intent import classify_customer_messages
 from vacancy_monitor.freelancehunt import FreelancehuntThread, FreelancehuntThreadMessage
 from vacancy_monitor.order_models import Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
@@ -38,6 +39,11 @@ def sync_thread_to_order(
     (inbox_dir / f"freelancehunt_{thread.thread_id}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+    )
+    _write_customer_intent(
+        inbox_dir,
+        channel="freelancehunt",
+        messages=[message.text for message in messages if not message.is_own and message.text],
     )
     _append_messages(order_dir / "conversation.md", thread, messages)
 
@@ -126,6 +132,19 @@ def _append_messages(path, thread: FreelancehuntThread, messages: list[Freelance
     if len(lines) > 1:
         with path.open("a", encoding="utf-8") as file:
             file.write("".join(lines))
+
+
+def _write_customer_intent(inbox_dir: Path, *, channel: str, messages: list[str]) -> None:
+    result = classify_customer_messages(messages)
+    payload = {
+        "channel": channel,
+        "classified_at": format_moscow_time(),
+        **result.to_dict(),
+    }
+    (inbox_dir / "customer_intent.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _trim(text: str, limit: int) -> str:

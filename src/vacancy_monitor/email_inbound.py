@@ -12,6 +12,7 @@ from email.utils import parsedate_to_datetime, parseaddr
 from pathlib import Path
 from typing import Callable
 
+from vacancy_monitor.customer_intent import classify_customer_messages
 from vacancy_monitor.freelancehunt import FreelancehuntThreadMessage
 from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
@@ -155,6 +156,7 @@ def sync_email_messages_to_order(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    _write_customer_intent(inbox_dir, messages=[message.text for message in messages if message.text])
     _append_email_messages(order_dir / "conversation.md", recipient, messages)
 
     next_status = OrderStatus.DISCOVERY if order.status == OrderStatus.OUTREACH_SENT else order.status
@@ -225,6 +227,19 @@ def _append_email_messages(path: Path, recipient: str, messages: list[EmailInbou
     if len(lines) > 1:
         with path.open("a", encoding="utf-8") as file:
             file.write("".join(lines))
+
+
+def _write_customer_intent(inbox_dir: Path, *, messages: list[str]) -> None:
+    result = classify_customer_messages(messages)
+    payload = {
+        "channel": "email",
+        "classified_at": format_moscow_time(),
+        **result.to_dict(),
+    }
+    (inbox_dir / "customer_intent.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _extract_text(message: Message) -> str:

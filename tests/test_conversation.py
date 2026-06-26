@@ -6,6 +6,7 @@ from vacancy_monitor.conversation import (
     sync_thread_to_order,
     write_thread_reply_draft,
 )
+from vacancy_monitor.customer_intent import CustomerIntent
 from vacancy_monitor.freelancehunt import FreelancehuntThread, FreelancehuntThreadMessage
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import OrderStatus, make_order_from_post
@@ -78,6 +79,8 @@ def test_sync_thread_to_order_writes_inbox_and_conversation(tmp_path):
     assert "Freelancehunt thread-1" in conversation
     assert "Здравствуйте, когда сможете начать?" in conversation
     assert store.load_order(order.order_id).status == OrderStatus.DISCOVERY
+    intent = (order_dir / "inbox" / "customer_intent.json").read_text(encoding="utf-8")
+    assert CustomerIntent.REQUIREMENTS_CLARIFICATION.value in intent
 
 
 def test_build_thread_notification_mentions_customer_message():

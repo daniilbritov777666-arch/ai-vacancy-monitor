@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+from vacancy_monitor.customer_intent import CustomerIntent
 from vacancy_monitor.email_inbound import (
     EmailInboundMessage,
     IMAPEmailClient,
@@ -117,6 +118,8 @@ def test_sync_email_messages_to_order_writes_inbox_and_conversation(tmp_path):
     conversation = (order_dir / "conversation.md").read_text(encoding="utf-8")
     assert "Email client@example.ru" in conversation
     assert "Можно начать сегодня?" in conversation
+    intent = (order_dir / "inbox" / "customer_intent.json").read_text(encoding="utf-8")
+    assert CustomerIntent.REQUIREMENTS_CLARIFICATION.value in intent
 
 
 def test_build_email_notification_mentions_latest_message():
