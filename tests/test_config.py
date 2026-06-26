@@ -192,6 +192,18 @@ def test_smtp_config_reads_env(monkeypatch):
     assert config.smtp_use_ssl is True
 
 
+def test_delivery_public_link_config_reads_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("DELIVERY_PUBLIC_BASE_URL", "https://files.example.ru/freelance/")
+    monkeypatch.setenv("DELIVERY_PUBLIC_DIR", str(tmp_path / "public"))
+
+    config = Config.from_env()
+
+    assert config.delivery_public_base_url == "https://files.example.ru/freelance"
+    assert config.delivery_public_dir == tmp_path / "public"
+
+
 def test_imap_config_reads_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")

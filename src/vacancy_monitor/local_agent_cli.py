@@ -1717,7 +1717,13 @@ def _maybe_finalize_delivery(
     delivery_text = _read_delivery_text(store, order)
     try:
         delivery_text = _append_payment_request_if_needed(store=store, order=order, config=config, text=delivery_text)
-        delivery_payload = build_delivery_payload(store=store, order=order, message_text=delivery_text)
+        delivery_payload = build_delivery_payload(
+            store=store,
+            order=order,
+            message_text=delivery_text,
+            public_base_url=config.delivery_public_base_url,
+            public_dir=config.delivery_public_dir,
+        )
         send_delivery(order, delivery_payload.message_text)
     except Exception as exc:
         _safe_notify(sender, f"Результат по заказу {order.order_id} не отправлен автоматически: {type(exc).__name__}.")
@@ -2420,6 +2426,8 @@ def _write_delivery_sent_record(
         "delivery_mode": delivery_payload.delivery_mode if delivery_payload else "manual_message",
         "attachment_supported": delivery_payload.attachment_supported if delivery_payload else False,
         "archive": delivery_payload.archive_path if delivery_payload else None,
+        "public_url": delivery_payload.public_url if delivery_payload else None,
+        "public_path": delivery_payload.public_path if delivery_payload else None,
         "instructions_ru": delivery_payload.instructions_ru if delivery_payload else None,
         "message": text,
         "generated_files": _generated_file_list(store=store, order=order),

@@ -1516,6 +1516,8 @@ def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
         auto_execution_draft_enabled=True,
         auto_delivery_enabled=True,
         auto_quality_enabled=True,
+        delivery_public_base_url="https://files.example.ru/freelance",
+        delivery_public_dir=tmp_path / "public",
         freelancehunt_api_token="fh-token",
         openai_api_key="sk-test",
         channels=[],
@@ -1548,6 +1550,7 @@ def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
     assert thread_id == "thread-1"
     assert "Отправляю готовый результат." in sent_text
     assert "Пакет результата" in sent_text
+    assert f"https://files.example.ru/freelance/{order.order_id}/delivery_package.zip" in sent_text
     assert (store.order_dir(order.order_id) / "outbox" / "delivery_message.sent.json").exists()
     receipt = json.loads((store.order_dir(order.order_id) / "outbox" / "delivery_receipt.json").read_text(encoding="utf-8"))
     assert receipt["status"] == "sent"
@@ -1555,8 +1558,11 @@ def test_run_local_agent_auto_sends_delivery_after_execution_draft(tmp_path):
     assert receipt["delivery_mode"] == "thread_message"
     assert receipt["attachment_supported"] is False
     assert receipt["archive"] == "outbox/delivery_package.zip"
+    assert receipt["public_url"] == f"https://files.example.ru/freelance/{order.order_id}/delivery_package.zip"
+    assert receipt["public_path"] == f"{order.order_id}/delivery_package.zip"
     assert receipt["quality"]["passed"] is True
     assert "execution/generated/bot.py" in receipt["generated_files"]
+    assert (tmp_path / "public" / order.order_id / "delivery_package.zip").exists()
     assert not (store.order_dir(order.order_id) / "outbox" / "delivery_approval_requested.json").exists()
     assert any("Результат автоматически отправлен заказчику" in message for message, _ in sent)
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import shutil
 import zipfile
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from vacancy_monitor.order_models import Order, format_moscow_time
 from vacancy_monitor.order_store import OrderStore
@@ -18,19 +20,37 @@ class DeliveryPayload:
     manifest_path: str
     fallback_path: str
     archive_path: str
+    public_url: str | None
+    public_path: str | None
     instructions_ru: str
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-def build_delivery_payload(*, store: OrderStore, order: Order, message_text: str) -> DeliveryPayload:
+def build_delivery_payload(
+    *,
+    store: OrderStore,
+    order: Order,
+    message_text: str,
+    public_base_url: str | None = None,
+    public_dir: Path | None = None,
+) -> DeliveryPayload:
     order_dir = store.order_dir(order.order_id)
     payload_text = _with_package_note(message_text)
     _write_delivery_message(store=store, order=order, message_text=payload_text)
     manifest_path = _write_delivery_package_manifest(store=store, order=order)
     fallback_path = order_dir / "outbox" / "delivery_fallback.md"
     archive_path = _write_delivery_archive(store=store, order=order, manifest_path=manifest_path)
+    public_link = _publish_archive_link(
+        archive_path=archive_path,
+        order=order,
+        public_base_url=public_base_url,
+        public_dir=public_dir,
+    )
+    if public_link:
+        payload_text = _with_public_link(payload_text, public_link["url"])
+        _write_delivery_message(store=store, order=order, message_text=payload_text)
     channel = _delivery_channel(order)
     payload = DeliveryPayload(
         channel=channel,
@@ -41,6 +61,8 @@ def build_delivery_payload(*, store: OrderStore, order: Order, message_text: str
         manifest_path=manifest_path.relative_to(order_dir).as_posix(),
         fallback_path=fallback_path.relative_to(order_dir).as_posix(),
         archive_path=archive_path.relative_to(order_dir).as_posix(),
+        public_url=public_link["url"] if public_link else None,
+        public_path=public_link["path"] if public_link else None,
         instructions_ru=(
             "Канал доставки сейчас отправляет текстовое сообщение. "
             "Файлы результата подготовлены в локальном пакете заказа; если площадка не поддерживает вложения, "
@@ -48,6 +70,31 @@ def build_delivery_payload(*, store: OrderStore, order: Order, message_text: str
         ),
     )
     return payload
+
+
+def _publish_archive_link(
+    *,
+    archive_path: Path,
+    order: Order,
+    public_base_url: str | None,
+    public_dir: Path | None,
+) -> dict[str, str] | None:
+    if not public_base_url or public_dir is None:
+        return None
+    relative_path = Path(order.order_id) / "delivery_package.zip"
+    target_path = public_dir / relative_path
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(archive_path, target_path)
+    return {
+        "url": f"{public_base_url.rstrip('/')}/{relative_path.as_posix()}",
+        "path": relative_path.as_posix(),
+    }
+
+
+def _with_public_link(message_text: str, public_url: str) -> str:
+    if public_url in message_text:
+        return message_text
+    return f"{message_text.rstrip()}\n\nСсылка на архив результата: {public_url}"
 
 
 def _write_delivery_message(*, store: OrderStore, order: Order, message_text: str) -> None:

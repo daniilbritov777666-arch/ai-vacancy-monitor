@@ -48,6 +48,36 @@ def test_build_delivery_payload_for_freelancehunt_thread_adds_package_note(tmp_p
     assert "outbox/delivery_package_manifest.json" in names
 
 
+def test_build_delivery_payload_publishes_archive_link(tmp_path):
+    store = OrderStore(tmp_path / "orders")
+    public_dir = tmp_path / "public"
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/bot/777.html",
+        url="https://freelancehunt.com/project/bot/777.html",
+        text="Нужен Telegram-бот.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+    store.save_order(order)
+    generated_dir = store.order_dir(order.order_id) / "execution" / "generated"
+    generated_dir.mkdir(parents=True)
+    (generated_dir / "bot.py").write_text("print('ready')\n", encoding="utf-8")
+
+    payload = build_delivery_payload(
+        store=store,
+        order=order,
+        message_text="Отправляю результат.",
+        public_base_url="https://files.example.ru/freelance",
+        public_dir=public_dir,
+    )
+
+    assert payload.public_url == f"https://files.example.ru/freelance/{order.order_id}/delivery_package.zip"
+    assert "Ссылка на архив" in payload.message_text
+    assert payload.public_path == f"{order.order_id}/delivery_package.zip"
+    assert (public_dir / order.order_id / "delivery_package.zip").exists()
+
+
 def test_build_delivery_payload_for_email_uses_email_message_mode(tmp_path):
     store = OrderStore(tmp_path / "orders")
     post = Post(

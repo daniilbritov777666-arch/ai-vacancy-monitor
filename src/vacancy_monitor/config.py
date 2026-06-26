@@ -68,6 +68,8 @@ class Config:
     yookassa_secret_key: str | None = None
     payment_return_url: str = "https://example.ru/payment-return"
     payment_instructions_ru: str = ""
+    delivery_public_base_url: str | None = None
+    delivery_public_dir: Path | None = None
     agent_queue_enabled: bool = False
     agent_queue_path: Path | None = None
     agent_jobs_per_cycle: int = 3
@@ -106,6 +108,9 @@ class Config:
         yookassa_secret_key = os.environ.get("YOOKASSA_SECRET_KEY", "").strip() or None
         payment_return_url = os.environ.get("PAYMENT_RETURN_URL", "https://example.ru/payment-return").strip()
         payment_instructions_ru = os.environ.get("PAYMENT_INSTRUCTIONS_RU", "").strip()
+        delivery_public_base_url = os.environ.get("DELIVERY_PUBLIC_BASE_URL", "").strip().rstrip("/") or None
+        delivery_public_dir_raw = os.environ.get("DELIVERY_PUBLIC_DIR", "").strip()
+        delivery_public_dir = Path(delivery_public_dir_raw) if delivery_public_dir_raw else None
         state_path = Path(os.environ.get("STATE_PATH", "data/seen_posts.json"))
         send_first_run = os.environ.get("SEND_FIRST_RUN", "").lower() in {"1", "true", "yes"}
         orders_path = Path(os.environ.get("ORDERS_PATH", "orders"))
@@ -211,6 +216,8 @@ class Config:
             yookassa_secret_key=yookassa_secret_key,
             payment_return_url=payment_return_url,
             payment_instructions_ru=payment_instructions_ru,
+            delivery_public_base_url=delivery_public_base_url,
+            delivery_public_dir=delivery_public_dir,
             agent_queue_enabled=agent_queue_enabled,
             agent_queue_path=agent_queue_path,
             agent_jobs_per_cycle=agent_jobs_per_cycle,
