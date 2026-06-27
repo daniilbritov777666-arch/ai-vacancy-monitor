@@ -210,6 +210,7 @@ def test_delivery_public_link_config_reads_env(monkeypatch, tmp_path):
     assert config.delivery_gateway_host == "127.0.0.1"
     assert config.delivery_gateway_port == 8787
     assert config.delivery_tunnel_enabled is True
+    assert config.delivery_public_verify_enabled is True
 
 
 def test_imap_config_reads_env(monkeypatch):

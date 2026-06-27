@@ -74,6 +74,7 @@ class Config:
     delivery_gateway_host: str = "127.0.0.1"
     delivery_gateway_port: int = 8787
     delivery_tunnel_enabled: bool = False
+    delivery_public_verify_enabled: bool = False
     agent_queue_enabled: bool = False
     agent_queue_path: Path | None = None
     agent_jobs_per_cycle: int = 3
@@ -119,6 +120,10 @@ class Config:
         delivery_gateway_host = os.environ.get("DELIVERY_GATEWAY_HOST", "127.0.0.1").strip() or "127.0.0.1"
         delivery_gateway_port = int(os.environ.get("DELIVERY_GATEWAY_PORT", "8787"))
         delivery_tunnel_enabled = _env_bool("DELIVERY_TUNNEL_ENABLED")
+        delivery_public_verify_enabled = _env_bool(
+            "DELIVERY_PUBLIC_VERIFY_ENABLED",
+            default=delivery_tunnel_enabled,
+        )
         state_path = Path(os.environ.get("STATE_PATH", "data/seen_posts.json"))
         send_first_run = os.environ.get("SEND_FIRST_RUN", "").lower() in {"1", "true", "yes"}
         orders_path = Path(os.environ.get("ORDERS_PATH", "orders"))
@@ -230,6 +235,7 @@ class Config:
             delivery_gateway_host=delivery_gateway_host,
             delivery_gateway_port=delivery_gateway_port,
             delivery_tunnel_enabled=delivery_tunnel_enabled,
+            delivery_public_verify_enabled=delivery_public_verify_enabled,
             agent_queue_enabled=agent_queue_enabled,
             agent_queue_path=agent_queue_path,
             agent_jobs_per_cycle=agent_jobs_per_cycle,

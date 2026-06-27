@@ -22,6 +22,7 @@ from vacancy_monitor.conversation import (
 )
 from vacancy_monitor.customer_intent import CustomerIntent, classify_customer_messages
 from vacancy_monitor.delivery_adapter import DeliveryPayload, build_delivery_payload
+from vacancy_monitor.delivery_gateway import verify_public_archive
 from vacancy_monitor.execution import (
     ExecutionDraftPackage,
     prepare_execution_workspace,
@@ -1724,6 +1725,12 @@ def _maybe_finalize_delivery(
             public_base_url=config.delivery_public_base_url,
             public_dir=config.delivery_public_dir,
         )
+        _verify_delivery_publication(
+            config=config,
+            store=store,
+            order=order,
+            delivery_payload=delivery_payload,
+        )
         send_delivery(order, delivery_payload.message_text)
     except Exception as exc:
         _safe_notify(sender, f"Результат по заказу {order.order_id} не отправлен автоматически: {type(exc).__name__}.")
@@ -1745,6 +1752,24 @@ def _maybe_finalize_delivery(
             f"ID: {updated.order_id}\n"
             "Статус: ожидаем оплату / подтверждение безопасной сделки."
         ),
+    )
+
+
+def _verify_delivery_publication(
+    *,
+    config: Config,
+    store: OrderStore,
+    order: Order,
+    delivery_payload: DeliveryPayload,
+) -> None:
+    if not config.delivery_public_verify_enabled or delivery_payload.channel != "freelancehunt":
+        return
+    archive_path = store.order_dir(order.order_id) / delivery_payload.archive_path
+    report_path = store.order_dir(order.order_id) / "outbox" / "delivery_readiness.json"
+    verify_public_archive(
+        public_url=delivery_payload.public_url or "",
+        archive_path=archive_path,
+        report_path=report_path,
     )
 
 

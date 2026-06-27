@@ -47,6 +47,7 @@
 - `AUTO_EXECUTION_DRAFT_ENABLED=true` - агент генерирует AI-пакет результата в `execution/generated/` и сообщение сдачи в `outbox/delivery_message.md`.
 - `AUTO_DELIVERY_ENABLED=true` - агент сам отправляет безопасный результат заказчику после генерации AI-пакета и переводит заказ в `payment_requested`.
 - `AUTO_DELIVERY_DAILY_LIMIT=5` - дневной лимит автосдачи результатов.
+- `DELIVERY_PUBLIC_VERIFY_ENABLED=true` - не отправляет заказчику недоступную или повреждённую ссылку на ZIP; результат проверки сохраняется в `outbox/delivery_readiness.json`.
 - `AUTO_QUALITY_ENABLED=true` - локальная и AI-проверка первоначального результата и автоправок до отправки.
 - `AUTO_QUALITY_MAX_REPAIRS=2` - две автоматические попытки исправить замечания; затем `quality_failed` без ручного согласования.
 - `EXECUTION_VERIFY_ENABLED=true` - обязательная изолированная проверка Python/JavaScript-файлов без сети и без записи в пакет.

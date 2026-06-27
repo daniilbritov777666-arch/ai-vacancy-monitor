@@ -128,6 +128,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AUTO_EXECUTION_DRAFT_ENABLED` - генерирует AI-пакет результата в `execution/generated/` и сообщение сдачи в `outbox/delivery_message.md`. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_DELIVERY_ENABLED` - разрешает агенту самому отправлять безопасный результат заказчику после генерации AI-пакета. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_DELIVERY_DAILY_LIMIT` - дневной лимит автосдачи результатов. По умолчанию `5`.
+- `DELIVERY_PUBLIC_VERIFY_ENABLED` - перед отправкой на Freelancehunt проверяет публичный ZIP через HTTPS и сверяет его размер. По умолчанию включено вместе с `DELIVERY_TUNNEL_ENABLED`; отчёт сохраняется в `outbox/delivery_readiness.json`.
 - `AUTO_QUALITY_ENABLED` - включает локальную и AI-проверку файлов перед первоначальной сдачей и отправкой правок. По умолчанию включено при `AUTO_MODE=autopilot`.
 - `AUTO_QUALITY_MAX_REPAIRS` - максимальное число автоматических исправлений после замечаний. По умолчанию `2`, допустимый диапазон `0..5`.
 - `EXECUTION_VERIFY_ENABLED` - запускает Python/JavaScript-пакеты в одноразовом контейнере перед AI-review и отправкой. В `autopilot` включено по умолчанию.
