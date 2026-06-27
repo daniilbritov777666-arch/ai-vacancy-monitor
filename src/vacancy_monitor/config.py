@@ -45,6 +45,7 @@ class Config:
     auto_quality_enabled: bool = False
     auto_quality_max_repairs: int = 2
     auto_payment_watch_enabled: bool = False
+    auto_payment_reminder_enabled: bool = False
     auto_revision_enabled: bool = False
     auto_revision_daily_limit: int = 5
     auto_revision_per_order_limit: int = 3
@@ -149,6 +150,7 @@ class Config:
         auto_quality_enabled = _env_bool("AUTO_QUALITY_ENABLED", default=autonomous_default)
         auto_quality_max_repairs = min(5, max(0, int(os.environ.get("AUTO_QUALITY_MAX_REPAIRS", "2"))))
         auto_payment_watch_enabled = _env_bool("AUTO_PAYMENT_WATCH_ENABLED", default=autonomous_default)
+        auto_payment_reminder_enabled = _env_bool("AUTO_PAYMENT_REMINDER_ENABLED", default=autonomous_default)
         auto_revision_enabled = _env_bool("AUTO_REVISION_ENABLED", default=autonomous_default)
         auto_revision_daily_limit = int(os.environ.get("AUTO_REVISION_DAILY_LIMIT", "5"))
         auto_revision_per_order_limit = min(10, max(0, int(os.environ.get("AUTO_REVISION_PER_ORDER_LIMIT", "3"))))
@@ -206,6 +208,7 @@ class Config:
             auto_quality_enabled=auto_quality_enabled,
             auto_quality_max_repairs=auto_quality_max_repairs,
             auto_payment_watch_enabled=auto_payment_watch_enabled,
+            auto_payment_reminder_enabled=auto_payment_reminder_enabled,
             auto_revision_enabled=auto_revision_enabled,
             auto_revision_daily_limit=auto_revision_daily_limit,
             auto_revision_per_order_limit=auto_revision_per_order_limit,

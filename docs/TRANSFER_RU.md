@@ -52,6 +52,7 @@
 - `AUTO_QUALITY_MAX_REPAIRS=2` - две автоматические попытки исправить замечания; затем `quality_failed` без ручного согласования.
 - `EXECUTION_VERIFY_ENABLED=true` - обязательная изолированная проверка Python/JavaScript-файлов без сети и без записи в пакет.
 - `AUTO_PAYMENT_WATCH_ENABLED=true` - агент проверяет `/v2/my/bids`, распознает победившую ставку и финальный статус проекта.
+- `AUTO_PAYMENT_REMINDER_ENABLED=true` - агент напоминает об оплате через 24/72 часа, ведёт `payment/reminders.json` и прекращает напоминания после сигнала оплаты.
 - `AUTO_REVISION_ENABLED=true` - агент сам обрабатывает безопасные правки после сдачи результата.
 - `AUTO_REVISION_DAILY_LIMIT=5` - дневной лимит автоматических правок.
 - `AUTO_STATUS_REPORT_ENABLED=true` - агент отправляет Telegram-отчет состояния с live-аудитом API Freelancehunt.

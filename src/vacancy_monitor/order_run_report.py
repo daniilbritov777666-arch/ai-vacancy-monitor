@@ -39,6 +39,7 @@ def _collect_artifacts(order_dir: Path) -> dict[str, Any]:
         "delivery_receipt": _relative_if_exists(order_dir, order_dir / "outbox" / "delivery_receipt.json")
         or _relative_if_exists(order_dir, order_dir / "outbox" / "delivery_message.sent.json"),
         "payment_request": _relative_if_exists(order_dir, order_dir / "payment" / "request.json"),
+        "payment_reminders": _relative_if_exists(order_dir, order_dir / "payment" / "reminders.json"),
         "freelancehunt_bid": _relative_if_exists(order_dir, order_dir / "payment" / "freelancehunt_bid.json"),
         "quality_report": _relative_if_exists(order_dir, order_dir / "quality" / "review.json"),
         "execution_package": _relative_if_exists(order_dir, order_dir / "execution" / "package.json"),

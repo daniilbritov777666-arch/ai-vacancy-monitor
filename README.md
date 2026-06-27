@@ -135,6 +135,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `EXECUTION_TIMEOUT_SECONDS`, `EXECUTION_MEMORY_MB`, `EXECUTION_CPUS`, `EXECUTION_MAX_OUTPUT_BYTES` - лимиты изолированного запуска. По умолчанию `120`, `512`, `1.0`, `65536`.
 - Установка runtime: `./scripts/setup_execution_runtime.sh`. Скрипт использует Homebrew/Colima или user-local Lima без admin-прав. Контейнер работает без сети, с read-only пакетом и без секретов агента.
 - `AUTO_PAYMENT_WATCH_ENABLED` - проверяет собственные ставки через `/v2/my/bids`, распознает выбранного исполнителя и закрывает локальный заказ после финального статуса проекта. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
+- `AUTO_PAYMENT_REMINDER_ENABLED` - отправляет не более двух напоминаний по неоплаченному заказу: через 24 часа после запроса оплаты и через 48 часов после первого напоминания. После сигнала оплаты напоминания прекращаются.
 - `AUTO_REVISION_ENABLED` - разрешает агенту самому обрабатывать безопасные правки после сдачи результата. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REVISION_DAILY_LIMIT` - дневной лимит автоматических правок. По умолчанию `5`.
 - `AUTO_STATUS_REPORT_ENABLED` - отправляет Telegram-отчет состояния агента с live-аудитом API Freelancehunt. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.

@@ -75,6 +75,7 @@ def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
     assert config.auto_quality_enabled is True
     assert config.auto_quality_max_repairs == 2
     assert config.auto_payment_watch_enabled is True
+    assert config.auto_payment_reminder_enabled is True
     assert config.auto_revision_enabled is True
     assert config.auto_revision_per_order_limit == 3
     assert config.auto_status_report_enabled is True

@@ -33,6 +33,7 @@ def test_write_order_run_report_links_state_artifacts_and_payment(tmp_path):
     (order_dir / "outbox" / "delivery_receipt.json").write_text('{"status": "sent"}\n', encoding="utf-8")
     payment = build_static_payment_request(order=order, amount_rub=12000, instructions_ru="Оплата по СБП.")
     write_payment_request(store=store, order=order, payment=payment)
+    (order_dir / "payment" / "reminders.json").write_text('{"events": []}\n', encoding="utf-8")
 
     path = write_order_run_report(store=store, order=order)
 
@@ -43,5 +44,6 @@ def test_write_order_run_report_links_state_artifacts_and_payment(tmp_path):
     assert payload["artifacts"]["conversation"] == "conversation.md"
     assert payload["artifacts"]["delivery_receipt"] == "outbox/delivery_receipt.json"
     assert payload["artifacts"]["payment_request"] == "payment/request.json"
+    assert payload["artifacts"]["payment_reminders"] == "payment/reminders.json"
     assert payload["payment"]["current_status"] == "requested"
     assert payload["payment"]["requested_amount_rub"] == 12000

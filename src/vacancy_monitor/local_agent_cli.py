@@ -72,7 +72,14 @@ from vacancy_monitor.payment_channel import (
     append_payment_ledger_event,
     build_static_payment_request,
     format_payment_block,
+    load_payment_ledger,
     write_payment_request,
+)
+from vacancy_monitor.payment_reminder import (
+    build_payment_reminder_text,
+    load_payment_reminders,
+    record_payment_reminder,
+    select_due_payment_reminder,
 )
 from vacancy_monitor.public_sources import (
     PUBLIC_SOURCE_URLS,
@@ -168,6 +175,7 @@ def run_local_agent_once(
     autopilot_client: AutopilotClient | None = None,
     send_outreach: Callable[[Order, str], None] | None = None,
     send_delivery: Callable[[Order, str], None] | None = None,
+    send_payment_reminder: Callable[[Order, str], None] | None = None,
     freelancehunt_client: FreelancehuntConversationClient | None = None,
     email_inbound_client: EmailInboundClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
@@ -348,6 +356,12 @@ def run_local_agent_once(
         sender=sender,
         freelancehunt_client=freelancehunt_client,
     )
+    _process_payment_reminders(
+        config=config,
+        store=store,
+        sender=sender,
+        send_payment_reminder=send_payment_reminder,
+    )
     _write_order_run_reports(store=store)
     _maybe_send_status_report(
         config=config,
@@ -364,6 +378,53 @@ def _write_order_run_reports(*, store: OrderStore) -> None:
             write_order_run_report(store=store, order=order)
         except OSError:
             continue
+
+
+def _process_payment_reminders(
+    *,
+    config: Config,
+    store: OrderStore,
+    sender: Callable[..., None],
+    send_payment_reminder: Callable[[Order, str], None] | None,
+) -> None:
+    if not config.auto_payment_reminder_enabled or send_payment_reminder is None:
+        return
+    for order in store.list_orders():
+        ledger = load_payment_ledger(store=store, order=order)
+        history = load_payment_reminders(store=store, order=order)
+        try:
+            reminder = select_due_payment_reminder(order=order, ledger=ledger, history=history)
+        except (TypeError, ValueError):
+            continue
+        if reminder is None:
+            continue
+        text = build_payment_reminder_text(order=order, sequence=reminder.sequence)
+        try:
+            send_payment_reminder(order, text)
+        except Exception as exc:
+            record_payment_reminder(
+                store=store,
+                order=order,
+                sequence=reminder.sequence,
+                status="failed",
+                error_type=type(exc).__name__,
+            )
+            _safe_notify(sender, f"Напоминание об оплате по заказу {order.order_id} не отправлено: {type(exc).__name__}.")
+            continue
+        record_payment_reminder(
+            store=store,
+            order=order,
+            sequence=reminder.sequence,
+            status="sent",
+        )
+        _safe_notify(
+            sender,
+            (
+                "Напоминание об оплате отправлено заказчику.\n\n"
+                f"ID: {order.order_id}\n"
+                f"Напоминание: {reminder.sequence} из 2"
+            ),
+        )
 
 
 def _enqueue_advance_order(*, config: Config, queue: AgentJobQueue, order: Order) -> None:
@@ -2636,8 +2697,18 @@ def run_local_agent_loop(
         if config.freelancehunt_api_token or (config.smtp_host and config.smtp_from)
         else None
     )
+    send_payment_reminder = (
+        (lambda order, text: _send_marketplace_followup(config, order, text))
+        if config.freelancehunt_api_token or (config.smtp_host and config.smtp_from)
+        else None
+    )
     while True:
-        run_local_agent_once(config, send_outreach=send_outreach, send_delivery=send_delivery)
+        run_local_agent_once(
+            config,
+            send_outreach=send_outreach,
+            send_delivery=send_delivery,
+            send_payment_reminder=send_payment_reminder,
+        )
         next_offset = poll_telegram_safely(
             bot_token=config.bot_token,
             offset=offset,
@@ -2700,6 +2771,34 @@ def _send_marketplace_delivery(config: Config, order: Order, text: str) -> None:
             from_email=config.smtp_from,
             use_ssl=config.smtp_use_ssl,
         ).send(order, text, attachments=attachments)
+        return
+    if order.contact.channel != "freelancehunt":
+        raise RuntimeError(f"unsupported contact channel: {order.contact.channel}")
+    if not config.freelancehunt_api_token:
+        raise RuntimeError("FREELANCEHUNT_API_TOKEN is required")
+
+    client = FreelancehuntClient(api_token=config.freelancehunt_api_token)
+    for thread in client.list_threads():
+        if thread.project_id == order.contact.value:
+            client.add_thread_message(thread_id=thread.thread_id, message_html=text)
+            return
+    raise RuntimeError("matching Freelancehunt thread not found")
+
+
+def _send_marketplace_followup(config: Config, order: Order, text: str) -> None:
+    if not order.contact:
+        raise RuntimeError("order has no contact")
+    if order.contact.channel == "email":
+        if not config.smtp_host or not config.smtp_from:
+            raise RuntimeError("SMTP_HOST and SMTP_FROM are required")
+        SMTPOutreachClient(
+            host=config.smtp_host,
+            port=config.smtp_port,
+            username=config.smtp_username,
+            password=config.smtp_password,
+            from_email=config.smtp_from,
+            use_ssl=config.smtp_use_ssl,
+        ).send(order, text)
         return
     if order.contact.channel != "freelancehunt":
         raise RuntimeError(f"unsupported contact channel: {order.contact.channel}")

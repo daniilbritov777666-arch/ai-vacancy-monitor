@@ -31,6 +31,7 @@ from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import CustomerContact, OrderStatus, make_order_from_post
 from vacancy_monitor.order_store import OrderStore
 from vacancy_monitor.payment_channel import load_payment_ledger
+from vacancy_monitor.payment_reminder import load_payment_reminders
 from vacancy_monitor.quality import AIQualityReview
 from vacancy_monitor.public_sources import PublicSourceHealth
 
@@ -1628,6 +1629,36 @@ def test_marketplace_email_delivery_attaches_package_archive(tmp_path, monkeypat
     assert sent == [(order.order_id, "Результат готов.", [archive_path])]
 
 
+def test_marketplace_email_followup_does_not_attach_delivery_archive(tmp_path, monkeypatch):
+    sent = []
+    config = replace(
+        make_config(tmp_path),
+        smtp_host="smtp.example.ru",
+        smtp_port=465,
+        smtp_username="robot@example.ru",
+        smtp_password="secret",
+        smtp_from="robot@example.ru",
+        smtp_use_ssl=True,
+    )
+    store = OrderStore(config.orders_path)
+    order = _email_delivery_order(store)
+    archive_path = store.order_dir(order.order_id) / "outbox" / "delivery_package.zip"
+    archive_path.write_bytes(b"zip-content")
+
+    class FakeSMTPOutreachClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def send(self, order, text, *, attachments=None):
+            sent.append((order.order_id, text, attachments))
+
+    monkeypatch.setattr(local_agent_cli, "SMTPOutreachClient", FakeSMTPOutreachClient)
+
+    local_agent_cli._send_marketplace_followup(config, order, "Напоминание об оплате.")
+
+    assert sent == [(order.order_id, "Напоминание об оплате.", None)]
+
+
 def test_auto_delivery_blocks_email_order_without_payment_channel(tmp_path):
     sent = []
     delivered = []
@@ -2001,6 +2032,69 @@ def test_run_local_agent_closes_payment_requested_order_when_winning_project_is_
     assert ledger["events"][-1]["event"] == "payment_confirmed"
     assert ledger["events"][-1]["provider"] == "freelancehunt_safe"
     assert any("Проект завершен на Freelancehunt" in message for message, _ in sent)
+
+
+def test_run_local_agent_sends_due_payment_reminder_only_once(tmp_path):
+    sent = []
+    reminders = []
+    config = replace(
+        make_config(tmp_path),
+        auto_payment_reminder_enabled=True,
+        channels=[],
+        rss_feeds=[],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/telegram-bot/123456.html",
+        url="https://freelancehunt.com/project/telegram-bot/123456.html",
+        text="Нужен Telegram-бот для заявок, бюджет 15 000 руб.",
+        published_at="2026-06-01T12:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты", risks=[]),
+        status=OrderStatus.PAYMENT_REQUESTED,
+        updated_at="25.06.2026 10:00 МСК",
+        price_rub=15000,
+    )
+    store.save_order(order)
+    payment_dir = store.order_dir(order.order_id) / "payment"
+    payment_dir.mkdir(parents=True)
+    (payment_dir / "ledger.json").write_text(
+        json.dumps(
+            {
+                "order_id": order.order_id,
+                "current_status": "requested",
+                "requested_amount_rub": 15000,
+                "confirmed_amount_rub": 0,
+                "events": [
+                    {
+                        "event": "payment_requested",
+                        "status": "requested",
+                        "created_at": "25.06.2026 10:00 МСК",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    for _ in range(2):
+        run_local_agent_once(
+            config,
+            fetch_posts=lambda channel: [],
+            fetch_rss_posts=lambda feed: [],
+            send_message=lambda text, reply_markup=None: sent.append((text, reply_markup)),
+            send_payment_reminder=lambda order, text: reminders.append((order.order_id, text)),
+        )
+
+    assert len(reminders) == 1
+    assert reminders[0][0] == order.order_id
+    assert "15 000 ₽" in reminders[0][1]
+    history = load_payment_reminders(store=store, order=order)
+    assert [(item["sequence"], item["status"]) for item in history["events"]] == [(1, "sent")]
+    assert any("Напоминание об оплате отправлено" in message for message, _ in sent)
 
 
 def test_run_local_agent_records_customer_payment_signal_without_closing_order(tmp_path):
