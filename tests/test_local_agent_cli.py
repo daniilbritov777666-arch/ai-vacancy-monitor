@@ -81,6 +81,50 @@ def test_run_local_agent_writes_public_source_health_report(tmp_path):
     ]
 
 
+def test_run_local_agent_uses_freelancehunt_api_instead_of_its_rss(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        channels=[],
+        rss_feeds=[
+            "https://freelancehunt.com/projects.rss",
+            "https://www.fl.ru/rss/projects.xml",
+        ],
+        freelancehunt_api_token="fh-token",
+        freelancehunt_api_source_enabled=True,
+        freelancehunt_api_pages=2,
+        public_project_sources=[],
+        public_source_probes=[],
+        send_first_run=False,
+    )
+    api_calls = []
+    rss_calls = []
+    api_post = Post(
+        source="freelancehunt_api",
+        post_id="freelancehunt_api:1638118",
+        url="https://api.freelancehunt.com/v2/projects/1638118",
+        text="Разовая задача: Telegram-бот для заявок. Бюджет: 4000 UAH.",
+        published_at="2026-06-28T12:00:00+03:00",
+    )
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: rss_calls.append(feed) or [],
+        fetch_public_posts=lambda source: [],
+        fetch_freelancehunt_posts=lambda token, pages: api_calls.append((token, pages)) or [api_post],
+        send_message=lambda text, reply_markup=None: None,
+    )
+
+    assert api_calls == [("fh-token", 2)]
+    assert rss_calls == ["https://www.fl.ru/rss/projects.xml"]
+    report = json.loads(
+        (config.orders_path / "reports" / "public_sources_health.json").read_text(encoding="utf-8")
+    )
+    api_health = next(item for item in report["sources"] if item["source"] == "freelancehunt_api")
+    assert api_health["status"] == "available"
+    assert api_health["posts"] == 1
+
+
 def test_run_local_agent_writes_marketplace_autopilot_plan(tmp_path):
     config = replace(
         make_config(tmp_path),
@@ -1773,6 +1817,7 @@ def test_marketplace_outreach_sends_bid_after_open_project_preflight(tmp_path, m
                     "attributes": {
                         "status": {"id": 11, "name": "Open for proposals"},
                         "safe_type": "employer",
+                        "budget": {"amount": 4000, "currency": "UAH"},
                         "freelancer": None,
                     },
                 }
@@ -1787,6 +1832,8 @@ def test_marketplace_outreach_sends_bid_after_open_project_preflight(tmp_path, m
     local_agent_cli._send_marketplace_outreach(config, order, "Готов выполнить задачу.")
 
     assert len(bids) == 1
+    assert bids[0][1].amount == 4000
+    assert bids[0][1].currency == "UAH"
     report = json.loads(
         (store.order_dir(order.order_id) / "outbox" / "freelancehunt_preflight.json").read_text(encoding="utf-8")
     )

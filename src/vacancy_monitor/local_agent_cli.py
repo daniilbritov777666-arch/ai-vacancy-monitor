@@ -55,6 +55,7 @@ from vacancy_monitor.freelancehunt import (
     FreelancehuntThread,
     FreelancehuntThreadMessage,
     build_bid_preflight,
+    fetch_freelancehunt_api_posts,
 )
 from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.job_queue import AgentJobQueue
@@ -172,6 +173,7 @@ def run_local_agent_once(
     fetch_posts: Callable[[str], list[Post]] = fetch_channel_posts,
     fetch_rss_posts: Callable[[str], list[Post]] | None = fetch_rss_feed_posts,
     fetch_public_posts: Callable[[str], list[Post]] | None = fetch_public_project_posts,
+    fetch_freelancehunt_posts: Callable[[str, int], list[Post]] = fetch_freelancehunt_api_posts,
     probe_public: Callable[[str], PublicSourceHealth] = probe_public_source,
     send_message: Callable[..., None] | None = None,
     autopilot_client: AutopilotClient | None = None,
@@ -205,6 +207,37 @@ def run_local_agent_once(
     public_health: list[PublicSourceHealth] = []
     public_posts: dict[str, list[Post]] = {}
     public_errors: dict[str, Exception] = {}
+    effective_public_sources = list(config.public_project_sources)
+
+    if config.freelancehunt_api_source_enabled and config.freelancehunt_api_token:
+        source = "freelancehunt_api"
+        effective_public_sources.append(source)
+        try:
+            posts = fetch_freelancehunt_posts(
+                config.freelancehunt_api_token,
+                config.freelancehunt_api_pages,
+            )
+            public_posts[source] = posts
+            public_health.append(
+                PublicSourceHealth(
+                    source=source,
+                    url=PUBLIC_SOURCE_URLS[source],
+                    checked_at=datetime.now(tz=MOSCOW_TZ).isoformat(),
+                    status="available",
+                    posts=len(posts),
+                )
+            )
+        except Exception as exc:
+            public_errors[source] = exc
+            public_health.append(
+                PublicSourceHealth(
+                    source=source,
+                    url=PUBLIC_SOURCE_URLS[source],
+                    checked_at=datetime.now(tz=MOSCOW_TZ).isoformat(),
+                    status="error",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            )
 
     if fetch_public_posts is not None:
         for source in config.public_project_sources:
@@ -233,7 +266,7 @@ def run_local_agent_once(
                 )
     for source in config.public_source_probes:
         public_health.append(probe_public(source))
-    if config.public_project_sources or config.public_source_probes:
+    if effective_public_sources or config.public_source_probes:
         write_public_source_health_report(
             config.orders_path / "reports" / "public_sources_health.json",
             public_health,
@@ -262,6 +295,10 @@ def run_local_agent_once(
     )
 
     def on_match(post: Post, result: MatchResult) -> None:
+        if post.source == "freelancehunt_api":
+            project_id = post.post_id.rsplit(":", 1)[-1]
+            if _find_order_for_project_id(store, project_id) is not None:
+                return
         order = handle_matched_post(
             post=post,
             result=result,
@@ -285,10 +322,19 @@ def run_local_agent_once(
                 email_health=email_health,
             )
 
+    effective_rss_feeds = [
+        feed
+        for feed in config.rss_feeds
+        if not (
+            config.freelancehunt_api_source_enabled
+            and config.freelancehunt_api_token
+            and "freelancehunt.com/projects.rss" in feed
+        )
+    ]
     summary = run_monitor(
         channels=config.channels,
-        rss_feeds=config.rss_feeds,
-        public_project_sources=config.public_project_sources,
+        rss_feeds=effective_rss_feeds,
+        public_project_sources=effective_public_sources,
         state_path=config.state_path,
         fetch_posts=fetch_posts,
         fetch_rss_posts=fetch_rss_posts,
@@ -2789,14 +2835,23 @@ def _send_marketplace_outreach(config: Config, order: Order, text: str) -> None:
         if not preflight["eligible"]:
             reasons = ", ".join(preflight["blockers"])
             raise FreelancehuntBidPreflightError(f"Freelancehunt bid preflight blocked: {reasons}")
+        project_budget = preflight["project"].get("budget") or {}
+        project_amount = project_budget.get("amount")
+        project_currency = project_budget.get("currency")
+        use_project_budget = (
+            isinstance(project_amount, (int, float))
+            and project_amount > 0
+            and project_currency in {"UAH", "RUB"}
+        )
         try:
             client.add_bid(
                 project_id=order.contact.value,
                 bid=FreelancehuntBid(
                     days=config.freelancehunt_bid_days,
-                    amount_rub=order.price_rub or config.auto_max_price_rub,
+                    amount=int(project_amount) if use_project_budget else (order.price_rub or config.auto_max_price_rub),
                     comment=text,
-                    safe_type=config.freelancehunt_bid_safe_type,
+                    safe_type=preflight["project"]["safe_type"] or config.freelancehunt_bid_safe_type,
+                    currency=project_currency if use_project_budget else "RUB",
                 ),
             )
         except Exception as exc:

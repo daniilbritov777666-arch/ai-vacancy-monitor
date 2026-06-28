@@ -6,7 +6,7 @@
 
 - GitHub Actions запускает проверку каждые 5 минут.
 - Скрипт читает публичные страницы `https://t.me/s/<channel>`.
-- Скрипт читает публичные RSS-ленты FL.ru/Freelancehunt и живые страницы разовых проектов Freelance.ru/Pchel.net.
+- Скрипт читает официальный API Freelancehunt, RSS FL.ru и живые страницы разовых проектов Freelance.ru/Pchel.net.
 - Kwork и Workzilla проверяются только на доступность: их публичные страницы не дают подтвержденный серверный поток живых проектов.
 - В ручном режиме подходящие заказы отправляются в Telegram с кнопками подтверждения; в `autopilot` безопасные заказы проходят без кнопок.
 - Локальный агент создает отдельную папку заказа в `orders/`.
@@ -56,7 +56,7 @@
 Необязательные переменные в `Settings -> Secrets and variables -> Actions -> Variables`:
 
 - `TELEGRAM_CHANNELS` - список каналов через запятую. По умолчанию: `mari_vakansii,digitaltender,FreeVacanciesIT`.
-- `RSS_FEEDS` - список RSS-лент через запятую. По умолчанию: `https://www.fl.ru/rss/projects.xml,https://freelancehunt.com/projects.rss`.
+- `RSS_FEEDS` - список RSS-лент через запятую. При включенном API-источнике Freelancehunt его RSS автоматически исключается, чтобы не создавать дубли.
 - `PUBLIC_PROJECT_SOURCES` - живые HTML-источники проектов. По умолчанию: `freelance_ru,pchel`.
 - `PUBLIC_SOURCE_PROBES` - площадки только для проверки доступности. По умолчанию: `kwork,workzilla`.
 - `SEND_FIRST_RUN` - поставь `true`, если хочешь отправить подходящие посты уже при первом запуске. По умолчанию старые посты только помечаются просмотренными.
@@ -142,6 +142,9 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AUTO_STATUS_REPORT_ENABLED` - отправляет Telegram-отчет состояния агента с live-аудитом API Freelancehunt. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_STATUS_REPORT_INTERVAL_MINUTES` - минимальный интервал между Telegram-отчетами. По умолчанию `360`.
 - `FREELANCEHUNT_API_TOKEN` - API-токен Freelancehunt для отправки отклика через `POST /v2/projects/{project_id}/bids`.
+- `FREELANCEHUNT_API_SOURCE_ENABLED` - получает открытые проекты напрямую через API. По умолчанию включено при `AUTO_MODE=autopilot`.
+- `FREELANCEHUNT_API_PAGES` - число проверяемых страниц API за цикл, от `1` до `5`. По умолчанию `1`.
+- API-источник принимает только открытые разовые проекты без выбранного исполнителя, с поддерживаемой безопасной сделкой (`employer`, `developer`, `split`) и бюджетом в `UAH` или `RUB`. Ставка отправляется в валюте и на сумму проекта.
 - `FREELANCEHUNT_BID_SAFE_TYPE` - тип безопасной сделки Freelancehunt: `employer`, `developer`, `split` или `employer_cashless`. По умолчанию `employer`.
 - `FREELANCEHUNT_BID_DAYS` - срок выполнения в днях для первого отклика. По умолчанию `2`.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_SSL` - SMTP для автоотклика на опубликованный email. Обычно порт `587` и STARTTLS; для SMTP SSL используется порт `465` и `SMTP_USE_SSL=true`.

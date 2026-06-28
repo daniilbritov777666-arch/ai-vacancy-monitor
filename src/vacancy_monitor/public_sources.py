@@ -19,6 +19,7 @@ USER_AGENT = "Mozilla/5.0 vacancy-monitor/0.1"
 MOSCOW = ZoneInfo("Europe/Moscow")
 
 PUBLIC_SOURCE_URLS = {
+    "freelancehunt_api": "https://api.freelancehunt.com/v2/projects",
     "freelance_ru": "https://freelance.ru/task",
     "pchel": "https://pchel.net/jobs/",
     "kwork": "https://kwork.ru/projects",

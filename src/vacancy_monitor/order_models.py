@@ -135,5 +135,8 @@ def _contact_from_post(post: Post) -> CustomerContact | None:
 def _freelancehunt_project_id(value: str) -> str | None:
     if "freelancehunt.com" not in value:
         return None
+    match = re.search(r"/projects/(\d+)(?:[/?#]|$)", value)
+    if match:
+        return match.group(1)
     match = re.search(r"/project/[^/]+/(\d+)(?:\\.html)?", value)
     return match.group(1) if match else None

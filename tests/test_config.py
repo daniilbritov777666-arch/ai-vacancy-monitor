@@ -79,6 +79,8 @@ def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
     assert config.auto_revision_enabled is True
     assert config.auto_revision_per_order_limit == 3
     assert config.auto_status_report_enabled is True
+    assert config.freelancehunt_api_source_enabled is True
+    assert config.freelancehunt_api_pages == 1
     assert config.agent_queue_enabled is True
     assert config.agent_queue_path == config.orders_path / "agent_jobs.sqlite3"
     assert config.agent_jobs_per_cycle == 3

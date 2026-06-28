@@ -1,4 +1,9 @@
-from vacancy_monitor.freelancehunt import FreelancehuntBid, FreelancehuntClient, build_bid_preflight
+from vacancy_monitor.freelancehunt import (
+    FreelancehuntBid,
+    FreelancehuntClient,
+    build_bid_preflight,
+    fetch_freelancehunt_api_posts,
+)
 
 
 class FakeResponse:
@@ -27,6 +32,42 @@ class FakeSession:
                 "timeout": timeout,
             }
         )
+        if "/projects?page[number]=" in url:
+            return FakeResponse(
+                {
+                    "data": [
+                        {
+                            "id": 1638118,
+                            "type": "project",
+                            "attributes": {
+                                "name": "ШІ агент по збору інформації",
+                                "description": "Мониторинг сайтов, AI-анализ, Google Sheets и Telegram.",
+                                "published_at": "2026-06-28T13:06:11+03:00",
+                                "expired_at": "2026-07-11T13:06:11+03:00",
+                                "status": {"id": 11, "name": "Прием ставок"},
+                                "safe_type": "employer",
+                                "budget": {"amount": 4000, "currency": "UAH"},
+                                "freelancer": None,
+                            },
+                            "links": {"self": "https://api.freelancehunt.com/v2/projects/1638118"},
+                        },
+                        {
+                            "id": 1638198,
+                            "type": "project",
+                            "attributes": {
+                                "name": "Тг бот",
+                                "description": "Перепубликация сообщений.",
+                                "published_at": "2026-06-28T14:00:00+03:00",
+                                "status": {"id": 11, "name": "Прием ставок"},
+                                "safe_type": "person",
+                                "budget": {"amount": 200, "currency": "PLN"},
+                                "freelancer": None,
+                            },
+                        },
+                    ]
+                },
+                status_code=200,
+            )
         if url.endswith("/my/profile"):
             return FakeResponse(
                 {
@@ -140,9 +181,10 @@ def test_freelancehunt_client_adds_project_bid():
         project_id="299172",
         bid=FreelancehuntBid(
             days=2,
-            amount_rub=12000,
+            amount=12000,
             comment="Здравствуйте! Готов выполнить задачу.",
             safe_type="employer",
+            currency="UAH",
         ),
     )
 
@@ -160,7 +202,7 @@ def test_freelancehunt_client_adds_project_bid():
             "json": {
                 "days": 2,
                 "safe_type": "employer",
-                "budget": {"amount": 12000, "currency": "RUB"},
+                "budget": {"amount": 12000, "currency": "UAH"},
                 "comment": "Здравствуйте! Готов выполнить задачу.",
                 "is_hidden": False,
             },
@@ -303,3 +345,20 @@ def test_bid_preflight_blocks_external_person_payment_type():
     assert audit["eligible"] is False
     assert audit["blockers"] == ["unsupported_project_safe_type"]
     assert audit["project"]["budget"] == {"amount": 200, "currency": "PLN"}
+
+
+def test_freelancehunt_api_source_returns_only_compatible_open_projects():
+    session = FakeSession()
+    client = FreelancehuntClient(api_token="fh-token", session=session)
+
+    posts = fetch_freelancehunt_api_posts(api_token="fh-token", pages=1, client=client)
+
+    assert len(posts) == 1
+    assert posts[0].source == "freelancehunt_api"
+    assert posts[0].post_id == "freelancehunt_api:1638118"
+    assert posts[0].url == "https://api.freelancehunt.com/v2/projects/1638118"
+    assert "ШІ агент" in posts[0].text
+    assert "Бюджет: 4000 UAH" in posts[0].text
+    assert "Тип сделки: employer" in posts[0].text
+    assert posts[0].published_at == "2026-06-28T13:06:11+03:00"
+    assert session.calls[0]["url"] == "https://api.freelancehunt.com/v2/projects?page[number]=1"

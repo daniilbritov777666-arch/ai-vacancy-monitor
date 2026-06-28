@@ -140,7 +140,12 @@ def _freelancehunt_channel(*, config: Config) -> MarketplaceChannel:
     return MarketplaceChannel(
         key="freelancehunt",
         name="Freelancehunt",
-        discovery="enabled" if any("freelancehunt.com" in feed for feed in config.rss_feeds) else "disabled",
+        discovery=(
+            "enabled"
+            if (config.freelancehunt_api_source_enabled and config.freelancehunt_api_token)
+            or any("freelancehunt.com" in feed for feed in config.rss_feeds)
+            else "disabled"
+        ),
         outreach=outreach,
         conversation=conversation,
         payment=payment,

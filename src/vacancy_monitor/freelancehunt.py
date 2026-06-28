@@ -8,6 +8,8 @@ from typing import Any
 
 import requests
 
+from vacancy_monitor.models import Post
+
 
 API_BASE_URL = "https://api.freelancehunt.com/v2"
 
@@ -19,9 +21,10 @@ class FreelancehuntBidPreflightError(RuntimeError):
 @dataclass(frozen=True)
 class FreelancehuntBid:
     days: int
-    amount_rub: int
+    amount: int
     comment: str
     safe_type: str = "employer"
+    currency: str = "RUB"
     is_hidden: bool = False
 
 
@@ -90,6 +93,15 @@ class FreelancehuntClient:
         response.raise_for_status()
         return response.json()
 
+    def list_open_projects(self, *, page: int = 1) -> list[dict]:
+        response = self.session.get(
+            f"{self.base_url}/projects?page[number]={max(1, page)}",
+            headers=self._headers(),
+            timeout=30,
+        )
+        response.raise_for_status()
+        return _data_list(response.json())
+
     def get_thread_messages(self, thread_id: str) -> list[FreelancehuntThreadMessage]:
         response = self.session.get(
             f"{self.base_url}/threads/{thread_id}",
@@ -127,7 +139,7 @@ class FreelancehuntClient:
             json={
                 "days": bid.days,
                 "safe_type": bid.safe_type,
-                "budget": {"amount": bid.amount_rub, "currency": "RUB"},
+                "budget": {"amount": bid.amount, "currency": bid.currency},
                 "comment": bid.comment,
                 "is_hidden": bid.is_hidden,
             },
@@ -208,6 +220,51 @@ def build_bid_preflight(*, profile: dict, project: dict) -> dict[str, Any]:
             "has_contractor": bool(project_attributes.get("freelancer")),
         },
     }
+
+
+def fetch_freelancehunt_api_posts(
+    api_token: str,
+    pages: int = 1,
+    client: FreelancehuntClient | None = None,
+) -> list[Post]:
+    api = client or FreelancehuntClient(api_token=api_token)
+    posts: list[Post] = []
+    for page in range(1, min(5, max(1, pages)) + 1):
+        for item in api.list_open_projects(page=page):
+            post = _open_project_post(item)
+            if post is not None:
+                posts.append(post)
+    return posts
+
+
+def _open_project_post(item: dict) -> Post | None:
+    attributes = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+    status = attributes.get("status") if isinstance(attributes.get("status"), dict) else {}
+    if status.get("id") != 11 or attributes.get("freelancer") or attributes.get("is_remote_job"):
+        return None
+    safe_type = attributes.get("safe_type")
+    if safe_type not in {"employer", "developer", "split"}:
+        return None
+    budget = attributes.get("budget") if isinstance(attributes.get("budget"), dict) else None
+    if budget and budget.get("currency") not in {"UAH", "RUB"}:
+        return None
+    project_id = str(item.get("id") or "")
+    name = attributes.get("name")
+    if not project_id or not isinstance(name, str) or not name.strip():
+        return None
+    links = item.get("links") if isinstance(item.get("links"), dict) else {}
+    url = links.get("self") or f"{API_BASE_URL}/projects/{project_id}"
+    parts = [name.strip(), str(attributes.get("description") or "").strip()]
+    if budget:
+        parts.append(f"Бюджет: {budget.get('amount')} {budget.get('currency')}")
+    parts.append(f"Тип сделки: {safe_type}")
+    return Post(
+        source="freelancehunt_api",
+        post_id=f"freelancehunt_api:{project_id}",
+        url=str(url),
+        text="\n".join(part for part in parts if part),
+        published_at=attributes.get("published_at") if isinstance(attributes.get("published_at"), str) else None,
+    )
 
 
 def status_value(value: Any) -> dict[str, Any] | None:

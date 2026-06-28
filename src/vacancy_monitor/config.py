@@ -32,6 +32,8 @@ class Config:
     freelancehunt_api_token: str | None = None
     freelancehunt_bid_safe_type: str = "employer"
     freelancehunt_bid_days: int = 2
+    freelancehunt_api_source_enabled: bool = False
+    freelancehunt_api_pages: int = 1
     auto_outreach_enabled: bool = False
     auto_outreach_daily_limit: int = 3
     auto_outreach_max_age_hours: int = 24
@@ -137,6 +139,11 @@ class Config:
         freelancehunt_bid_safe_type = os.environ.get("FREELANCEHUNT_BID_SAFE_TYPE", "employer").strip()
         freelancehunt_bid_days = int(os.environ.get("FREELANCEHUNT_BID_DAYS", "2"))
         autonomous_default = auto_mode == "autopilot"
+        freelancehunt_api_source_enabled = _env_bool(
+            "FREELANCEHUNT_API_SOURCE_ENABLED",
+            default=autonomous_default,
+        )
+        freelancehunt_api_pages = min(5, max(1, int(os.environ.get("FREELANCEHUNT_API_PAGES", "1"))))
         auto_outreach_enabled = _env_bool("AUTO_OUTREACH_ENABLED", default=autonomous_default)
         auto_outreach_daily_limit = int(os.environ.get("AUTO_OUTREACH_DAILY_LIMIT", "3"))
         auto_outreach_max_age_hours = int(os.environ.get("AUTO_OUTREACH_MAX_AGE_HOURS", "24"))
@@ -195,6 +202,8 @@ class Config:
             freelancehunt_api_token=freelancehunt_api_token,
             freelancehunt_bid_safe_type=freelancehunt_bid_safe_type,
             freelancehunt_bid_days=freelancehunt_bid_days,
+            freelancehunt_api_source_enabled=freelancehunt_api_source_enabled,
+            freelancehunt_api_pages=freelancehunt_api_pages,
             auto_outreach_enabled=auto_outreach_enabled,
             auto_outreach_daily_limit=auto_outreach_daily_limit,
             auto_outreach_max_age_hours=auto_outreach_max_age_hours,

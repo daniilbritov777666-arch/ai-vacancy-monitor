@@ -67,6 +67,23 @@ def test_make_order_from_freelancehunt_post_enables_api_contact():
     assert order.contact.can_auto_send is True
 
 
+def test_make_order_from_freelancehunt_api_post_enables_api_contact():
+    post = Post(
+        source="freelancehunt_api",
+        post_id="freelancehunt_api:1638118",
+        url="https://api.freelancehunt.com/v2/projects/1638118",
+        text="Нужен Telegram-бот для заявок. Бюджет: 4000 UAH.",
+        published_at="2026-06-28T12:00:00+03:00",
+    )
+
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+
+    assert order.contact is not None
+    assert order.contact.channel == "freelancehunt"
+    assert order.contact.value == "1638118"
+    assert order.contact.can_auto_send is True
+
+
 def test_make_order_from_public_post_extracts_email_contact():
     post = Post(
         source="freelance.ru",

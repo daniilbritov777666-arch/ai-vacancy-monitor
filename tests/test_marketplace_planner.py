@@ -29,6 +29,8 @@ def test_marketplace_plan_marks_freelancehunt_as_full_autopilot_channel(tmp_path
         auto_mode="autopilot",
         openai_api_key="sk-test",
         freelancehunt_api_token="fh-token",
+        freelancehunt_api_source_enabled=True,
+        rss_feeds=["https://www.fl.ru/rss/projects.xml"],
         auto_outreach_enabled=True,
         auto_conversation_enabled=True,
         auto_payment_watch_enabled=True,
