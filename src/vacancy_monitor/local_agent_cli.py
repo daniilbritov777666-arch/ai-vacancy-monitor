@@ -49,10 +49,12 @@ from vacancy_monitor.email_transport_health import (
 )
 from vacancy_monitor.freelancehunt import (
     FreelancehuntBid,
+    FreelancehuntBidPreflightError,
     FreelancehuntClient,
     FreelancehuntMyBid,
     FreelancehuntThread,
     FreelancehuntThreadMessage,
+    build_bid_preflight,
 )
 from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.job_queue import AgentJobQueue
@@ -815,6 +817,9 @@ def _write_outreach_send_failure(*, store: OrderStore, order: Order, exc: Except
     }
     if order.contact and order.contact.channel == "freelancehunt":
         payload["endpoint"] = f"/projects/{order.contact.value}/bids"
+    api_error = _safe_freelancehunt_api_error(response)
+    if api_error:
+        payload["api_error"] = api_error
     detail = str(exc).strip()
     if detail:
         payload["detail"] = detail[:200]
@@ -829,10 +834,44 @@ def _write_outreach_send_failure(*, store: OrderStore, order: Order, exc: Except
     )
 
 
+def _safe_freelancehunt_api_error(response) -> dict | None:
+    if response is None:
+        return None
+    try:
+        payload = response.json()
+    except (TypeError, ValueError, AttributeError):
+        return None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return None
+    result = {}
+    for key in ("status", "title", "detail"):
+        value = error.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            result[key] = value[:500] if isinstance(value, str) else value
+    meta = error.get("meta")
+    if isinstance(meta, dict) and isinstance(meta.get("info"), dict):
+        result["meta"] = {"info": _safe_api_info(meta["info"])}
+    return result or None
+
+
+def _safe_api_info(info: dict) -> dict:
+    safe = {}
+    for key, value in list(info.items())[:20]:
+        if not isinstance(key, str):
+            continue
+        if isinstance(value, list):
+            safe[key] = [str(item)[:300] for item in value[:10]]
+        elif isinstance(value, (str, int, float, bool)):
+            safe[key] = value[:500] if isinstance(value, str) else value
+    return safe
+
+
 def _outreach_failure_status(exc: Exception) -> OrderStatus:
     response = getattr(exc, "response", None)
     status_code = getattr(response, "status_code", None)
-    if status_code == 410:
+    preflight = getattr(exc, "freelancehunt_preflight", None)
+    if status_code == 410 and not (isinstance(preflight, dict) and preflight.get("eligible")):
         return OrderStatus.CLOSED
     return OrderStatus.SEND_FAILED
 
@@ -2742,17 +2781,51 @@ def _send_marketplace_outreach(config: Config, order: Order, text: str) -> None:
         if not config.freelancehunt_api_token:
             raise RuntimeError("FREELANCEHUNT_API_TOKEN is required")
         client = FreelancehuntClient(api_token=config.freelancehunt_api_token)
-        client.add_bid(
-            project_id=order.contact.value,
-            bid=FreelancehuntBid(
-                days=config.freelancehunt_bid_days,
-                amount_rub=order.price_rub or config.auto_max_price_rub,
-                comment=text,
-                safe_type=config.freelancehunt_bid_safe_type,
-            ),
+        preflight = build_bid_preflight(
+            profile=client.get_profile(),
+            project=client.get_project(order.contact.value),
         )
+        _write_freelancehunt_preflight(config=config, order=order, preflight=preflight)
+        if not preflight["eligible"]:
+            reasons = ", ".join(preflight["blockers"])
+            raise FreelancehuntBidPreflightError(f"Freelancehunt bid preflight blocked: {reasons}")
+        try:
+            client.add_bid(
+                project_id=order.contact.value,
+                bid=FreelancehuntBid(
+                    days=config.freelancehunt_bid_days,
+                    amount_rub=order.price_rub or config.auto_max_price_rub,
+                    comment=text,
+                    safe_type=config.freelancehunt_bid_safe_type,
+                ),
+            )
+        except Exception as exc:
+            exc.freelancehunt_preflight = preflight
+            raise
         return
     raise RuntimeError(f"unsupported contact channel: {order.contact.channel}")
+
+
+def _write_freelancehunt_preflight(*, config: Config, order: Order, preflight: dict) -> None:
+    payload = {"checked_at": format_moscow_time(), **preflight}
+    order_path = config.orders_path / order.order_id / "outbox" / "freelancehunt_preflight.json"
+    order_path.parent.mkdir(parents=True, exist_ok=True)
+    order_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    profile_path = config.orders_path / "reports" / "freelancehunt_profile_capabilities.json"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        json.dumps(
+            {
+                "checked_at": payload["checked_at"],
+                "profile": preflight["profile"],
+                "warnings": preflight["warnings"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _send_marketplace_delivery(config: Config, order: Order, text: str) -> None:

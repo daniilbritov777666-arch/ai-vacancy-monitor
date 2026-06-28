@@ -903,7 +903,21 @@ def test_run_local_agent_writes_send_failure_diagnostics_for_failed_outreach(tmp
 
     def failing_send_outreach(order, text):
         error = requests.HTTPError("422 Client Error")
-        error.response = type("Response", (), {"status_code": 422})()
+        error.response = type(
+            "Response",
+            (),
+            {
+                "status_code": 422,
+                "json": lambda self: {
+                    "error": {
+                        "status": 422,
+                        "title": "Unprocessable Entity",
+                        "detail": "Profile verification required",
+                        "meta": {"info": {"profile": ["Verify phone"]}},
+                    }
+                },
+            },
+        )()
         raise error
 
     run_local_agent_once(
@@ -926,6 +940,12 @@ def test_run_local_agent_writes_send_failure_diagnostics_for_failed_outreach(tmp
     assert payload["error"] == "HTTPError"
     assert payload["status_code"] == 422
     assert payload["endpoint"] == "/projects/123456/bids"
+    assert payload["api_error"] == {
+        "status": 422,
+        "title": "Unprocessable Entity",
+        "detail": "Profile verification required",
+        "meta": {"info": {"profile": ["Verify phone"]}},
+    }
     assert any("не отправлен: HTTPError" in message for message, _ in sent)
 
 
@@ -1657,6 +1677,180 @@ def test_marketplace_email_followup_does_not_attach_delivery_archive(tmp_path, m
     local_agent_cli._send_marketplace_followup(config, order, "Напоминание об оплате.")
 
     assert sent == [(order.order_id, "Напоминание об оплате.", None)]
+
+
+def test_marketplace_outreach_blocks_bid_when_preflight_project_is_not_open(tmp_path, monkeypatch):
+    config = replace(make_config(tmp_path), freelancehunt_api_token="fh-token")
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/bot/123456.html",
+        url="https://freelancehunt.com/project/bot/123456.html",
+        text="Нужен Telegram-бот, бюджет 15 000 руб.",
+        published_at="2026-06-28T10:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), price_rub=15000)
+    store.save_order(order)
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_profile(self):
+            return {
+                "data": {
+                    "id": 1965999,
+                    "type": "freelancer",
+                    "attributes": {"verification": {"identity": False, "birth_date": False, "phone": False, "email": True}},
+                }
+            }
+
+        def get_project(self, project_id):
+            return {
+                "data": {
+                    "id": project_id,
+                    "type": "project",
+                    "attributes": {
+                        "status": {"id": 13, "name": "Contractor chosen"},
+                        "safe_type": "employer",
+                        "freelancer": {"id": 99},
+                    },
+                }
+            }
+
+        def add_bid(self, **kwargs):
+            raise AssertionError("bid must not be sent")
+
+    monkeypatch.setattr(local_agent_cli, "FreelancehuntClient", FakeClient)
+
+    try:
+        local_agent_cli._send_marketplace_outreach(config, order, "Готов выполнить задачу.")
+    except RuntimeError as exc:
+        assert type(exc).__name__ == "FreelancehuntBidPreflightError"
+    else:
+        raise AssertionError("closed project must fail preflight")
+
+    report = json.loads(
+        (store.order_dir(order.order_id) / "outbox" / "freelancehunt_preflight.json").read_text(encoding="utf-8")
+    )
+    assert report["eligible"] is False
+    assert report["project"]["status_id"] == 13
+    assert report["blockers"] == ["project_not_open_for_proposals", "project_has_contractor"]
+
+
+def test_marketplace_outreach_sends_bid_after_open_project_preflight(tmp_path, monkeypatch):
+    bids = []
+    config = replace(make_config(tmp_path), freelancehunt_api_token="fh-token")
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/bot/123456.html",
+        url="https://freelancehunt.com/project/bot/123456.html",
+        text="Нужен Telegram-бот, бюджет 15 000 руб.",
+        published_at="2026-06-28T10:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), price_rub=15000)
+    store.save_order(order)
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_profile(self):
+            return {
+                "data": {
+                    "id": 1965999,
+                    "type": "freelancer",
+                    "attributes": {"verification": {"identity": False, "birth_date": False, "phone": False, "email": True}},
+                }
+            }
+
+        def get_project(self, project_id):
+            return {
+                "data": {
+                    "id": project_id,
+                    "type": "project",
+                    "attributes": {
+                        "status": {"id": 11, "name": "Open for proposals"},
+                        "safe_type": "employer",
+                        "freelancer": None,
+                    },
+                }
+            }
+
+        def add_bid(self, *, project_id, bid):
+            bids.append((project_id, bid))
+            return {"data": {"id": 1}}
+
+    monkeypatch.setattr(local_agent_cli, "FreelancehuntClient", FakeClient)
+
+    local_agent_cli._send_marketplace_outreach(config, order, "Готов выполнить задачу.")
+
+    assert len(bids) == 1
+    report = json.loads(
+        (store.order_dir(order.order_id) / "outbox" / "freelancehunt_preflight.json").read_text(encoding="utf-8")
+    )
+    assert report["eligible"] is True
+    assert report["warnings"] == [
+        "profile_identity_not_verified",
+        "profile_birth_date_not_verified",
+        "profile_phone_not_verified",
+    ]
+
+
+def test_open_project_bid_410_is_kept_for_profile_diagnostics(tmp_path, monkeypatch):
+    config = replace(make_config(tmp_path), freelancehunt_api_token="fh-token")
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/bot/123456.html",
+        url="https://freelancehunt.com/project/bot/123456.html",
+        text="Нужен Telegram-бот, бюджет 15 000 руб.",
+        published_at="2026-06-28T10:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), price_rub=15000)
+    store.save_order(order)
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_profile(self):
+            return {
+                "data": {
+                    "id": 1965999,
+                    "type": "freelancer",
+                    "attributes": {"verification": {"identity": False, "birth_date": False, "phone": False, "email": True}},
+                }
+            }
+
+        def get_project(self, project_id):
+            return {
+                "data": {
+                    "id": project_id,
+                    "type": "project",
+                    "attributes": {
+                        "status": {"id": 11, "name": "Open for proposals"},
+                        "safe_type": "employer",
+                        "freelancer": None,
+                    },
+                }
+            }
+
+        def add_bid(self, **kwargs):
+            error = requests.HTTPError("410 Client Error")
+            error.response = type("Response", (), {"status_code": 410})()
+            raise error
+
+    monkeypatch.setattr(local_agent_cli, "FreelancehuntClient", FakeClient)
+
+    try:
+        local_agent_cli._send_marketplace_outreach(config, order, "Готов выполнить задачу.")
+    except requests.HTTPError as exc:
+        assert local_agent_cli._outreach_failure_status(exc) == OrderStatus.SEND_FAILED
+        assert exc.freelancehunt_preflight["eligible"] is True
+    else:
+        raise AssertionError("bid error must propagate")
 
 
 def test_auto_delivery_blocks_email_order_without_payment_channel(tmp_path):

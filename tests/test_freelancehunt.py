@@ -1,4 +1,4 @@
-from vacancy_monitor.freelancehunt import FreelancehuntBid, FreelancehuntClient
+from vacancy_monitor.freelancehunt import FreelancehuntBid, FreelancehuntClient, build_bid_preflight
 
 
 class FakeResponse:
@@ -27,6 +27,44 @@ class FakeSession:
                 "timeout": timeout,
             }
         )
+        if url.endswith("/my/profile"):
+            return FakeResponse(
+                {
+                    "data": {
+                        "id": 1965999,
+                        "type": "freelancer",
+                        "attributes": {
+                            "login": "daniilbritov",
+                            "is_plus_active": False,
+                            "status": {"id": 10, "name": "Свободен для работы"},
+                            "verification": {
+                                "identity": False,
+                                "birth_date": False,
+                                "phone": False,
+                                "email": True,
+                            },
+                        },
+                    }
+                },
+                status_code=200,
+            )
+        if "/projects/" in url:
+            return FakeResponse(
+                {
+                    "data": {
+                        "id": 1638234,
+                        "type": "project",
+                        "attributes": {
+                            "status": {"id": 11, "name": "Open for proposals"},
+                            "safe_type": "employer",
+                            "budget": {"amount": 4000, "currency": "UAH"},
+                            "expired_at": "2026-07-12T13:28:31+03:00",
+                            "freelancer": None,
+                        },
+                    }
+                },
+                status_code=200,
+            )
         if url.endswith("/threads"):
             return FakeResponse(
                 {
@@ -180,3 +218,88 @@ def test_freelancehunt_client_lists_my_bids_with_project_state():
     assert bids[0].is_winner is True
     assert bids[0].project_status == "completed"
     assert session.calls[0]["url"] == "https://api.freelancehunt.com/v2/my/bids"
+
+
+def test_freelancehunt_client_reads_profile_and_project_for_bid_preflight():
+    session = FakeSession()
+    client = FreelancehuntClient(api_token="fh-token", session=session)
+
+    profile = client.get_profile()
+    project = client.get_project("1638234")
+    audit = build_bid_preflight(profile=profile, project=project)
+
+    assert audit["eligible"] is True
+    assert audit["profile"]["id"] == "1965999"
+    assert audit["profile"]["verification"]["email"] is True
+    assert audit["profile"]["verification"]["identity"] is False
+    assert audit["project"]["id"] == "1638234"
+    assert audit["project"]["status_id"] == 11
+    assert audit["project"]["safe_type"] == "employer"
+    assert audit["project"]["budget"] == {"amount": 4000, "currency": "UAH"}
+    assert audit["warnings"] == [
+        "profile_identity_not_verified",
+        "profile_birth_date_not_verified",
+        "profile_phone_not_verified",
+    ]
+    assert [call["url"] for call in session.calls] == [
+        "https://api.freelancehunt.com/v2/my/profile",
+        "https://api.freelancehunt.com/v2/projects/1638234",
+    ]
+
+
+def test_bid_preflight_blocks_closed_and_business_safe_projects():
+    profile = {
+        "data": {
+            "id": 1,
+            "type": "freelancer",
+            "attributes": {"verification": {"identity": True, "birth_date": True, "phone": True, "email": True}},
+        }
+    }
+    project = {
+        "data": {
+            "id": 2,
+            "type": "project",
+            "attributes": {
+                "status": {"id": 13, "name": "Contractor chosen"},
+                "safe_type": "employer_cashless",
+                "freelancer": {"id": 99},
+            },
+        }
+    }
+
+    audit = build_bid_preflight(profile=profile, project=project)
+
+    assert audit["eligible"] is False
+    assert audit["blockers"] == [
+        "project_not_open_for_proposals",
+        "project_has_contractor",
+        "business_safe_not_supported_by_api",
+    ]
+
+
+def test_bid_preflight_blocks_external_person_payment_type():
+    profile = {
+        "data": {
+            "id": 1,
+            "type": "freelancer",
+            "attributes": {"verification": {"identity": True, "birth_date": True, "phone": True, "email": True}},
+        }
+    }
+    project = {
+        "data": {
+            "id": 2,
+            "type": "project",
+            "attributes": {
+                "status": {"id": 11, "name": "Open for proposals"},
+                "safe_type": "person",
+                "budget": {"amount": 200, "currency": "PLN"},
+                "freelancer": None,
+            },
+        }
+    }
+
+    audit = build_bid_preflight(profile=profile, project=project)
+
+    assert audit["eligible"] is False
+    assert audit["blockers"] == ["unsupported_project_safe_type"]
+    assert audit["project"]["budget"] == {"amount": 200, "currency": "PLN"}

@@ -35,6 +35,7 @@
 - `AUTO_MODE=draft` - AI готовит файлы в папке заказа, но статус заказа не продвигает.
 - `AUTO_MODE=autopilot` - AI готовит файлы и переводит безопасный заказ в `draft_ready`, если цена не выше `AUTO_MAX_PRICE_RUB`.
 - `AUTO_OUTREACH_ENABLED=true` - агент может сам отправлять первый безопасный отклик через Freelancehunt API или опубликованный email.
+- Для Freelancehunt перед `POST /bids` выполняется profile/project preflight. Capability профиля сохраняется в `orders/reports/freelancehunt_profile_capabilities.json`, данные конкретного проекта - в `outbox/freelancehunt_preflight.json`.
 - `PUBLIC_PROJECT_SOURCES=freelance_ru,pchel` - включает дополнительные живые страницы разовых проектов.
 - `PUBLIC_SOURCE_PROBES=kwork,workzilla` - проверяет доступность площадок без импорта демонстрационных заданий.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_SSL` - канал первого email-отклика; если он не настроен, мониторинг источников все равно работает.

@@ -121,6 +121,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AUTO_OUTREACH_ENABLED` - разрешает агенту самому отправлять первый безопасный отклик через API Freelancehunt или на опубликованный email после AI-проверки. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_OUTREACH_DAILY_LIMIT` - дневной лимит автооткликов. По умолчанию `3`.
 - `AUTO_OUTREACH_MAX_AGE_HOURS` - максимальный возраст проекта для автоотклика. По умолчанию `24` часа.
+- Перед ставкой на Freelancehunt агент проверяет профиль и текущий статус проекта через API. Отчёт сохраняется в `outbox/freelancehunt_preflight.json`; несовместимые типы сделки блокируются до отправки.
 - `AUTO_CONVERSATION_ENABLED` - разрешает читать входящие треды Freelancehunt, сохранять их в `conversation.md`/`inbox/`, готовить AI-черновик ответа в `outbox/` и уведомлять Telegram. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REPLY_ENABLED` - разрешает агенту самому отправлять безопасные последующие ответы в тред Freelancehunt. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_REPLY_DAILY_LIMIT` - дневной лимит автоответов в треды. По умолчанию `10`.

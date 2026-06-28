@@ -12,6 +12,10 @@ import requests
 API_BASE_URL = "https://api.freelancehunt.com/v2"
 
 
+class FreelancehuntBidPreflightError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class FreelancehuntBid:
     days: int
@@ -67,6 +71,24 @@ class FreelancehuntClient:
         response.raise_for_status()
         payload = response.json()
         return [_thread_from_api(item) for item in _data_list(payload)]
+
+    def get_profile(self) -> dict:
+        response = self.session.get(
+            f"{self.base_url}/my/profile",
+            headers=self._headers(),
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_project(self, project_id: str) -> dict:
+        response = self.session.get(
+            f"{self.base_url}/projects/{project_id}",
+            headers=self._headers(),
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
 
     def get_thread_messages(self, thread_id: str) -> list[FreelancehuntThreadMessage]:
         response = self.session.get(
@@ -130,6 +152,74 @@ class FreelancehuntClient:
             "Accept-Language": "ru",
             "Content-Type": "application/json",
         }
+
+
+def build_bid_preflight(*, profile: dict, project: dict) -> dict[str, Any]:
+    profile_data = profile.get("data") if isinstance(profile, dict) else {}
+    project_data = project.get("data") if isinstance(project, dict) else {}
+    profile_data = profile_data if isinstance(profile_data, dict) else {}
+    project_data = project_data if isinstance(project_data, dict) else {}
+    profile_attributes = profile_data.get("attributes")
+    project_attributes = project_data.get("attributes")
+    profile_attributes = profile_attributes if isinstance(profile_attributes, dict) else {}
+    project_attributes = project_attributes if isinstance(project_attributes, dict) else {}
+    verification = profile_attributes.get("verification")
+    verification = verification if isinstance(verification, dict) else {}
+    status = project_attributes.get("status")
+    status = status if isinstance(status, dict) else {}
+
+    blockers: list[str] = []
+    if status.get("id") != 11:
+        blockers.append("project_not_open_for_proposals")
+    if project_attributes.get("freelancer"):
+        blockers.append("project_has_contractor")
+    project_safe_type = project_attributes.get("safe_type")
+    if project_safe_type == "employer_cashless":
+        blockers.append("business_safe_not_supported_by_api")
+    elif project_safe_type not in {"employer", "developer", "split"}:
+        blockers.append("unsupported_project_safe_type")
+
+    warning_fields = {
+        "identity": "profile_identity_not_verified",
+        "birth_date": "profile_birth_date_not_verified",
+        "phone": "profile_phone_not_verified",
+        "email": "profile_email_not_verified",
+    }
+    warnings = [message for field, message in warning_fields.items() if verification.get(field) is False]
+    return {
+        "eligible": not blockers,
+        "blockers": blockers,
+        "warnings": warnings,
+        "profile": {
+            "id": str(profile_data.get("id") or ""),
+            "type": profile_data.get("type"),
+            "login": profile_attributes.get("login"),
+            "is_plus_active": bool(profile_attributes.get("is_plus_active")),
+            "status": status_value(profile_attributes.get("status")),
+            "verification": {field: verification.get(field) for field in warning_fields},
+        },
+        "project": {
+            "id": str(project_data.get("id") or ""),
+            "status_id": status.get("id"),
+            "status_name": status.get("name"),
+            "safe_type": project_attributes.get("safe_type"),
+            "budget": _safe_budget(project_attributes.get("budget")),
+            "expired_at": project_attributes.get("expired_at"),
+            "has_contractor": bool(project_attributes.get("freelancer")),
+        },
+    }
+
+
+def status_value(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {"id": value.get("id"), "name": value.get("name")}
+
+
+def _safe_budget(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {"amount": value.get("amount"), "currency": value.get("currency")}
 
 
 def _data_list(payload: Any) -> list[dict]:

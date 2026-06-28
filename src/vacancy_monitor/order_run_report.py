@@ -35,6 +35,9 @@ def _collect_artifacts(order_dir: Path) -> dict[str, Any]:
         "autopilot_analysis": _relative_if_exists(order_dir, order_dir / "autopilot" / "analysis.json"),
         "outreach": _relative_if_exists(order_dir, order_dir / "autopilot" / "outreach.md"),
         "send_failure": _relative_if_exists(order_dir, order_dir / "outbox" / "send_failure.json"),
+        "freelancehunt_preflight": _relative_if_exists(
+            order_dir, order_dir / "outbox" / "freelancehunt_preflight.json"
+        ),
         "delivery_message": _relative_if_exists(order_dir, order_dir / "outbox" / "delivery_message.md"),
         "delivery_receipt": _relative_if_exists(order_dir, order_dir / "outbox" / "delivery_receipt.json")
         or _relative_if_exists(order_dir, order_dir / "outbox" / "delivery_message.sent.json"),
