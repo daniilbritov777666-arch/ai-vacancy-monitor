@@ -268,6 +268,7 @@ def run_order_autopilot(
     mode: str,
 ) -> Order:
     result = _result_with_budget_fallback(order, result)
+    result = _result_without_unverified_experience_claims(result)
     order_dir = store.order_dir(order.order_id)
     _write_autopilot_files(order_dir, result)
 
@@ -306,6 +307,21 @@ def _result_with_budget_fallback(order: Order, result: AutopilotResult) -> Autop
     if fallback_price <= 0:
         return result
     return replace(result, price_rub=fallback_price)
+
+
+def _result_without_unverified_experience_claims(result: AutopilotResult) -> AutopilotResult:
+    patterns = [
+        r"\bесть\s+(?:релевантный\s+|практический\s+|успешный\s+)?опыт\b",
+        r"\b(?:я|мы)\s+реализовал[аи]?\b",
+        r"\b(?:я|мы)\s+работал[аи]?\s+с\b",
+        r"\bвыполнил[аи]?\s+\d+\b",
+    ]
+    text = f"{result.outreach_ru}\n{result.customer_message_ru}".lower()
+    if not any(re.search(pattern, text) for pattern in patterns):
+        return result
+    risk = "неподтвержденное заявление об опыте"
+    risks = result.risk_flags if risk in result.risk_flags else [*result.risk_flags, risk]
+    return replace(result, safe_to_autopilot=False, risk_flags=risks)
 
 
 def _extract_budget_rub(text: str) -> int:
@@ -441,7 +457,8 @@ def _build_input(order: Order) -> list[dict]:
                 "Ты автономный помощник для разовых IT-фриланс заказов в РФ. "
                 "Пиши по-русски. Не бери серые задачи, обходы лимитов, массовые аккаунты, "
                 "накрутки, фишинг, вредоносное ПО и незаконный сбор персональных данных. "
-                "Не обещай срок меньше 24 часов."
+                "Не обещай срок меньше 24 часов. Не заявляй о прошлом опыте, кейсах, клиентах "
+                "или выполненных проектах, если они явно не указаны во входных данных."
             ),
         },
         {

@@ -439,4 +439,32 @@ def test_run_order_autopilot_skips_unsafe_order_without_manual_approval(tmp_path
     updated = run_order_autopilot(order=order, store=store, result=result, max_price_rub=15000, mode="autopilot")
 
     assert updated.status == OrderStatus.SKIPPED
+
+
+def test_run_order_autopilot_blocks_unverified_experience_claim(tmp_path):
+    order = make_order()
+    store = OrderStore(tmp_path / "orders")
+    store.save_order(order)
+    result = AutopilotResult(
+        safe_to_autopilot=True,
+        risk_flags=[],
+        summary_ru="Нужен бот.",
+        outreach_ru="Здравствуйте! Есть релевантный опыт работы с ClickUp API и e-commerce.",
+        execution_plan_ru="Уточнить ТЗ и выполнить.",
+        price_rub=12000,
+        deadline_ru="2 дня",
+        deliverable_markdown="# Результат",
+        customer_message_ru="Готов обсудить задачу.",
+    )
+
+    updated = run_order_autopilot(
+        order=order,
+        store=store,
+        result=result,
+        max_price_rub=15000,
+        mode="autopilot",
+    )
+
+    assert updated.status == OrderStatus.SKIPPED
+    assert "неподтвержденное заявление об опыте" in updated.risks
     assert store.load_order(order.order_id).status == OrderStatus.SKIPPED
