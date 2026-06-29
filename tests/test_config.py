@@ -10,7 +10,7 @@ def test_default_sources_are_project_feeds_only(monkeypatch):
 
     assert config.channels == []
     assert "https://www.fl.ru/rss/projects.xml" in config.rss_feeds
-    assert config.public_project_sources == ["freelance_ru", "pchel"]
+    assert config.public_project_sources == ["freelance_ru", "pchel", "weblancer"]
     assert config.public_source_probes == ["kwork", "workzilla"]
 
 

@@ -1904,6 +1904,68 @@ def test_open_project_bid_410_is_kept_for_profile_diagnostics(tmp_path, monkeypa
         raise AssertionError("bid error must propagate")
 
 
+def test_deprecated_freelancehunt_bid_endpoint_marks_contact_unavailable():
+    error = requests.HTTPError("410 Client Error")
+    error.response = type(
+        "Response",
+        (),
+        {
+            "status_code": 410,
+            "json": lambda self: {
+                "error": {
+                    "status": 410,
+                    "title": "This public endpoint is no longer available due to API v2 deprecation.",
+                }
+            },
+        },
+    )()
+
+    assert local_agent_cli._outreach_failure_status(error) == OrderStatus.CONTACT_UNAVAILABLE
+
+
+def test_recovery_keeps_open_project_when_bid_endpoint_is_deprecated(tmp_path):
+    sent = []
+    config = replace(make_config(tmp_path), auto_outreach_enabled=True)
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt_api",
+        post_id="freelancehunt_api:1638234",
+        url="https://freelancehunt.com/project/bot/1638234.html",
+        text="Нужен Telegram-бот, бюджет обсуждается.",
+        published_at="2026-06-29T10:00:00+03:00",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты", risks=[]),
+        status=OrderStatus.SEND_FAILED,
+    )
+    store.save_order(order)
+    outbox = store.order_dir(order.order_id) / "outbox"
+    outbox.mkdir(parents=True)
+    (outbox / "send_failure.json").write_text(
+        json.dumps(
+            {
+                "status_code": 410,
+                "api_error": {
+                    "status": 410,
+                    "title": "This public endpoint is no longer available due to API v2 deprecation.",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    updated = local_agent_cli._recover_send_failed_outreach(
+        config=config,
+        order=order,
+        store=store,
+        sender=lambda text, reply_markup=None: sent.append(text),
+        send_outreach=lambda order, text: None,
+    )
+
+    assert updated.status == OrderStatus.CONTACT_UNAVAILABLE
+    assert any("API откликов отключен" in message for message in sent)
+
+
 def test_auto_delivery_blocks_email_order_without_payment_channel(tmp_path):
     sent = []
     delivered = []

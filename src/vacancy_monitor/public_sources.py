@@ -22,6 +22,7 @@ PUBLIC_SOURCE_URLS = {
     "freelancehunt_api": "https://api.freelancehunt.com/v2/projects",
     "freelance_ru": "https://freelance.ru/task",
     "pchel": "https://pchel.net/jobs/",
+    "weblancer": "https://www.weblancer.net/freelance/",
     "kwork": "https://kwork.ru/projects",
     "workzilla": "https://work-zilla.com/tasks",
 }
@@ -42,12 +43,14 @@ class SourceContractError(RuntimeError):
 
 
 def fetch_public_project_posts(source_name: str) -> list[Post]:
-    if source_name not in {"freelance_ru", "pchel"}:
+    if source_name not in {"freelance_ru", "pchel", "weblancer"}:
         raise ValueError(f"Unsupported public project source: {source_name}")
     html = _fetch_html(source_name)
     fetched_at = datetime.now(tz=MOSCOW)
     if source_name == "freelance_ru":
         return parse_freelance_ru(html, fetched_at)
+    if source_name == "weblancer":
+        return parse_weblancer(html, fetched_at)
     return parse_pchel(html, fetched_at)
 
 
@@ -65,6 +68,9 @@ def probe_public_source(source_name: str) -> PublicSourceHealth:
             posts = 0
         elif source_name == "freelance_ru":
             posts = len(parse_freelance_ru(html, datetime.now(tz=MOSCOW)))
+            status = "available"
+        elif source_name == "weblancer":
+            posts = len(parse_weblancer(html, datetime.now(tz=MOSCOW)))
             status = "available"
         else:
             posts = len(parse_pchel(html, datetime.now(tz=MOSCOW)))
@@ -189,6 +195,43 @@ def parse_pchel(html: str, fetched_at: datetime) -> list[Post]:
                 published_at=published_at.isoformat() if published_at else None,
             )
         )
+    return posts
+
+
+def parse_weblancer(html: str, fetched_at: datetime) -> list[Post]:
+    soup = BeautifulSoup(html, "html.parser")
+    cards = soup.select("article")
+    posts: list[Post] = []
+    for card in cards:
+        link = card.find("a", href=re.compile(r"/freelance/[^/]+/[^/]+-(\d+)/?$"))
+        if link is None:
+            continue
+        href = str(link.get("href") or "")
+        match = re.search(r"-(\d+)/?$", href)
+        if not match:
+            continue
+        text = re.sub(r"\s+", " ", card.get_text(" ", strip=True)).strip()
+        date_match = re.search(r"\b(\d{2}\.\d{2}\.\d{4})\b", text)
+        published_at = None
+        if date_match:
+            try:
+                published_at = datetime.strptime(date_match.group(1), "%d.%m.%Y").replace(
+                    tzinfo=fetched_at.tzinfo
+                )
+            except ValueError:
+                pass
+        project_id = match.group(1)
+        posts.append(
+            Post(
+                source="weblancer.net",
+                post_id=f"weblancer:{project_id}",
+                url=urljoin("https://www.weblancer.net", href),
+                text=text,
+                published_at=published_at.isoformat() if published_at else None,
+            )
+        )
+    if not posts:
+        raise SourceContractError("Weblancer project cards were not found")
     return posts
 
 

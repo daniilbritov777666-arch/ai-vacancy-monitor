@@ -48,6 +48,22 @@ def test_marketplace_plan_marks_freelancehunt_as_full_autopilot_channel(tmp_path
     assert plan.ready_channels == ["freelancehunt"]
 
 
+def test_marketplace_plan_explains_disabled_freelancehunt_outreach(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_token="fh-token",
+        auto_outreach_enabled=False,
+    )
+
+    plan = build_marketplace_plan(config=config, public_health=[])
+
+    freelancehunt = next(channel for channel in plan.channels if channel.key == "freelancehunt")
+    assert freelancehunt.outreach == "blocked"
+    assert "официальный API создания ставок отключен площадкой" in freelancehunt.blockers
+
+
 def test_marketplace_plan_keeps_public_sources_discovery_only_without_email_sender(tmp_path):
     config = replace(
         make_config(tmp_path),

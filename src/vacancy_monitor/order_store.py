@@ -21,7 +21,11 @@ ALLOWED_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
         OrderStatus.CLOSED,
     },
     OrderStatus.MANUAL_SEND_NEEDED: {OrderStatus.DISCOVERY, OrderStatus.OUTREACH_SENT, OrderStatus.CLOSED},
-    OrderStatus.SEND_FAILED: {OrderStatus.DRAFT_READY, OrderStatus.CLOSED},
+    OrderStatus.SEND_FAILED: {
+        OrderStatus.DRAFT_READY,
+        OrderStatus.CONTACT_UNAVAILABLE,
+        OrderStatus.CLOSED,
+    },
     OrderStatus.DRAFT_READY: {
         OrderStatus.OUTREACH_SENT,
         OrderStatus.AWAITING_DELIVERY_APPROVAL,

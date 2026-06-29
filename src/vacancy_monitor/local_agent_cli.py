@@ -707,7 +707,15 @@ def _recover_send_failed_outreach(
     send_outreach: Callable[[Order, str], None] | None,
     email_health: EmailTransportHealth | None = None,
 ) -> Order:
-    status_code = _read_outreach_failure_status_code(store=store, order=order)
+    failure = _read_outreach_failure(store=store, order=order)
+    status_code = failure.get("status_code")
+    if _is_deprecated_bid_api_error(failure.get("api_error")):
+        updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
+        _safe_notify(
+            sender,
+            f"Заказ {order.order_id}: официальный API откликов отключен площадкой Freelancehunt.",
+        )
+        return updated
     if status_code == 410:
         updated = store.update_status(order.order_id, OrderStatus.CLOSED)
         _safe_notify(sender, f"Заказ {order.order_id} закрыт: площадка вернула 410 Gone при отклике.")
@@ -727,12 +735,17 @@ def _recover_send_failed_outreach(
 
 
 def _read_outreach_failure_status_code(*, store: OrderStore, order: Order) -> int | None:
+    value = _read_outreach_failure(store=store, order=order).get("status_code")
+    return value if isinstance(value, int) else None
+
+
+def _read_outreach_failure(*, store: OrderStore, order: Order) -> dict:
     path = store.order_dir(order.order_id) / "outbox" / "send_failure.json"
     try:
-        value = json.loads(path.read_text(encoding="utf-8")).get("status_code")
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, int) else None
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _is_retryable_outreach_failure(status_code: int | None) -> bool:
@@ -917,10 +930,19 @@ def _safe_api_info(info: dict) -> dict:
 def _outreach_failure_status(exc: Exception) -> OrderStatus:
     response = getattr(exc, "response", None)
     status_code = getattr(response, "status_code", None)
+    if _is_deprecated_bid_api_error(_safe_freelancehunt_api_error(response)):
+        return OrderStatus.CONTACT_UNAVAILABLE
     preflight = getattr(exc, "freelancehunt_preflight", None)
     if status_code == 410 and not (isinstance(preflight, dict) and preflight.get("eligible")):
         return OrderStatus.CLOSED
     return OrderStatus.SEND_FAILED
+
+
+def _is_deprecated_bid_api_error(api_error) -> bool:
+    if not isinstance(api_error, dict):
+        return False
+    title = str(api_error.get("title") or "").lower()
+    return "endpoint is no longer available" in title and "deprecation" in title
 
 
 def _project_is_completed(bid: FreelancehuntMyBid) -> bool:

@@ -9,6 +9,7 @@ from vacancy_monitor.public_sources import (
     fetch_public_project_posts,
     parse_freelance_ru,
     parse_pchel,
+    parse_weblancer,
     probe_public_source,
 )
 
@@ -43,6 +44,21 @@ PCHEL_HTML = """
 """
 
 
+WEBLANCER_HTML = """
+<div class="space-y-3">
+  <article class="bg-white p-6 rounded-md shadow">
+    <h2 class="text-xl font-semibold">
+      <a href="/freelance/sozdanie-botov-61/telegram-bot-dlya-zayavok-1268001/">Telegram-бот для заявок</a>
+    </h2>
+    <span>15 000 ₽</span>
+    <p>Разовая задача: интеграция с API и Google Sheets.</p>
+    <div>Создание ботов Python</div>
+    <time>29.06.2026</time>
+  </article>
+</div>
+"""
+
+
 def test_parse_freelance_ru_extracts_project_fields():
     posts = parse_freelance_ru(FREELANCE_RU_HTML, fetched_at=datetime(2026, 6, 20, 18, 0, tzinfo=MOSCOW))
 
@@ -67,9 +83,23 @@ def test_parse_pchel_extracts_project_fields():
     assert posts[0].published_at == "2026-06-20T18:00:00+03:00"
 
 
+def test_parse_weblancer_extracts_project_fields():
+    posts = parse_weblancer(WEBLANCER_HTML, fetched_at=datetime(2026, 6, 29, 20, 0, tzinfo=MOSCOW))
+
+    assert len(posts) == 1
+    assert posts[0].post_id == "weblancer:1268001"
+    assert posts[0].url == (
+        "https://www.weblancer.net/freelance/sozdanie-botov-61/telegram-bot-dlya-zayavok-1268001/"
+    )
+    assert "Telegram-бот для заявок" in posts[0].text
+    assert "15 000 ₽" in posts[0].text
+    assert "Google Sheets" in posts[0].text
+    assert posts[0].published_at == "2026-06-29T00:00:00+03:00"
+
+
 @pytest.mark.parametrize(
     "parser",
-    [parse_freelance_ru, parse_pchel],
+    [parse_freelance_ru, parse_pchel, parse_weblancer],
 )
 def test_parser_raises_when_required_project_container_disappears(parser):
     with pytest.raises(SourceContractError):

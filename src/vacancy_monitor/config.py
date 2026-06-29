@@ -11,7 +11,7 @@ DEFAULT_RSS_FEEDS = [
     "https://www.fl.ru/rss/projects.xml",
     "https://freelancehunt.com/projects.rss",
 ]
-DEFAULT_PUBLIC_PROJECT_SOURCES = ["freelance_ru", "pchel"]
+DEFAULT_PUBLIC_PROJECT_SOURCES = ["freelance_ru", "pchel", "weblancer"]
 DEFAULT_PUBLIC_SOURCE_PROBES = ["kwork", "workzilla"]
 
 

@@ -130,6 +130,8 @@ def _freelancehunt_channel(*, config: Config) -> MarketplaceChannel:
         blockers.append("AUTO_MODE не autopilot")
     if not config.openai_api_key:
         blockers.append("нет OPENAI_API_KEY")
+    if config.freelancehunt_api_token and not config.auto_outreach_enabled:
+        blockers.append("официальный API создания ставок отключен площадкой")
     outreach = "auto" if config.freelancehunt_api_token and config.auto_outreach_enabled else "blocked"
     conversation = "auto" if config.freelancehunt_api_token and config.auto_conversation_enabled else "blocked"
     payment = (
@@ -151,7 +153,7 @@ def _freelancehunt_channel(*, config: Config) -> MarketplaceChannel:
         payment=payment,
         priority=1,
         blockers=blockers,
-        notes_ru="Основной канал полного цикла через официальный API.",
+        notes_ru="API поддерживает поиск и существующие сделки; создание новой ставки отключено площадкой.",
     )
 
 
