@@ -34,6 +34,7 @@ class Config:
     freelancehunt_bid_days: int = 2
     freelancehunt_api_source_enabled: bool = False
     freelancehunt_api_pages: int = 1
+    freelancehunt_api_skill_ids: list[int] = field(default_factory=list)
     auto_outreach_enabled: bool = False
     auto_outreach_daily_limit: int = 3
     auto_outreach_max_age_hours: int = 24
@@ -144,6 +145,7 @@ class Config:
             default=autonomous_default,
         )
         freelancehunt_api_pages = min(5, max(1, int(os.environ.get("FREELANCEHUNT_API_PAGES", "1"))))
+        freelancehunt_api_skill_ids = _positive_int_csv(os.environ.get("FREELANCEHUNT_API_SKILL_IDS"))
         auto_outreach_enabled = _env_bool("AUTO_OUTREACH_ENABLED", default=autonomous_default)
         auto_outreach_daily_limit = int(os.environ.get("AUTO_OUTREACH_DAILY_LIMIT", "3"))
         auto_outreach_max_age_hours = int(os.environ.get("AUTO_OUTREACH_MAX_AGE_HOURS", "24"))
@@ -204,6 +206,7 @@ class Config:
             freelancehunt_bid_days=freelancehunt_bid_days,
             freelancehunt_api_source_enabled=freelancehunt_api_source_enabled,
             freelancehunt_api_pages=freelancehunt_api_pages,
+            freelancehunt_api_skill_ids=freelancehunt_api_skill_ids,
             auto_outreach_enabled=auto_outreach_enabled,
             auto_outreach_daily_limit=auto_outreach_daily_limit,
             auto_outreach_max_age_hours=auto_outreach_max_age_hours,
@@ -268,6 +271,17 @@ def _csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip().lstrip("@") for item in value.split(",") if item.strip()]
+
+
+def _positive_int_csv(value: str | None) -> list[int]:
+    result: list[int] = []
+    for item in _csv(value):
+        parsed = int(item)
+        if parsed <= 0:
+            raise RuntimeError("FREELANCEHUNT_API_SKILL_IDS must contain positive integers")
+        if parsed not in result:
+            result.append(parsed)
+    return result
 
 
 def _env_bool(name: str, *, default: bool = False) -> bool:

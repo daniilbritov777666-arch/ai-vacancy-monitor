@@ -173,7 +173,7 @@ def run_local_agent_once(
     fetch_posts: Callable[[str], list[Post]] = fetch_channel_posts,
     fetch_rss_posts: Callable[[str], list[Post]] | None = fetch_rss_feed_posts,
     fetch_public_posts: Callable[[str], list[Post]] | None = fetch_public_project_posts,
-    fetch_freelancehunt_posts: Callable[[str, int], list[Post]] = fetch_freelancehunt_api_posts,
+    fetch_freelancehunt_posts: Callable[[str, int, list[int]], list[Post]] = fetch_freelancehunt_api_posts,
     probe_public: Callable[[str], PublicSourceHealth] = probe_public_source,
     send_message: Callable[..., None] | None = None,
     autopilot_client: AutopilotClient | None = None,
@@ -216,6 +216,7 @@ def run_local_agent_once(
             posts = fetch_freelancehunt_posts(
                 config.freelancehunt_api_token,
                 config.freelancehunt_api_pages,
+                config.freelancehunt_api_skill_ids,
             )
             public_posts[source] = posts
             public_health.append(

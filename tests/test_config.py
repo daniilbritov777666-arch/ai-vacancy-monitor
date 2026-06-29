@@ -81,6 +81,7 @@ def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
     assert config.auto_status_report_enabled is True
     assert config.freelancehunt_api_source_enabled is True
     assert config.freelancehunt_api_pages == 1
+    assert config.freelancehunt_api_skill_ids == []
     assert config.agent_queue_enabled is True
     assert config.agent_queue_path == config.orders_path / "agent_jobs.sqlite3"
     assert config.agent_jobs_per_cycle == 3
@@ -93,6 +94,16 @@ def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
     assert config.execution_timeout_seconds == 120
     assert config.execution_memory_mb == 512
     assert config.execution_cpus == 1.0
+
+
+def test_freelancehunt_api_skill_ids_are_parsed_and_deduplicated(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("FREELANCEHUNT_API_SKILL_IDS", "180,169,22,180")
+
+    config = Config.from_env()
+
+    assert config.freelancehunt_api_skill_ids == [180, 169, 22]
     assert config.execution_max_output_bytes == 65536
 
 

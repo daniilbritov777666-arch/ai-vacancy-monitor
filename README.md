@@ -144,6 +144,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `FREELANCEHUNT_API_TOKEN` - API-токен Freelancehunt для отправки отклика через `POST /v2/projects/{project_id}/bids`.
 - `FREELANCEHUNT_API_SOURCE_ENABLED` - получает открытые проекты напрямую через API. По умолчанию включено при `AUTO_MODE=autopilot`.
 - `FREELANCEHUNT_API_PAGES` - число проверяемых страниц API за цикл, от `1` до `5`. По умолчанию `1`.
+- `FREELANCEHUNT_API_SKILL_IDS` - skill ID через запятую для серверного отбора профильных проектов. Рабочий набор: `180,169,22,86,178,189,150,197` (боты, парсинг, Python, базы данных, обработка данных, автоматизация, CRM, AI-обработка текстов).
 - API-источник принимает только открытые разовые проекты без выбранного исполнителя, с поддерживаемой безопасной сделкой (`employer`, `developer`, `split`) и бюджетом в `UAH` или `RUB`. Ставка отправляется в валюте и на сумму проекта.
 - `FREELANCEHUNT_BID_SAFE_TYPE` - тип безопасной сделки Freelancehunt: `employer`, `developer`, `split` или `employer_cashless`. По умолчанию `employer`.
 - `FREELANCEHUNT_BID_DAYS` - срок выполнения в днях для первого отклика. По умолчанию `2`.

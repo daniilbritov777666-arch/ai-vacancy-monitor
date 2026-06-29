@@ -32,7 +32,7 @@ class FakeSession:
                 "timeout": timeout,
             }
         )
-        if "/projects?page[number]=" in url:
+        if "/projects?" in url:
             return FakeResponse(
                 {
                     "data": [
@@ -49,7 +49,12 @@ class FakeSession:
                                 "budget": {"amount": 4000, "currency": "UAH"},
                                 "freelancer": None,
                             },
-                            "links": {"self": "https://api.freelancehunt.com/v2/projects/1638118"},
+                            "links": {
+                                "self": {
+                                    "api": "https://api.freelancehunt.com/v2/projects/1638118",
+                                    "web": "https://freelancehunt.com/project/ai-agent/1638118.html",
+                                }
+                            },
                         },
                         {
                             "id": 1638198,
@@ -351,14 +356,21 @@ def test_freelancehunt_api_source_returns_only_compatible_open_projects():
     session = FakeSession()
     client = FreelancehuntClient(api_token="fh-token", session=session)
 
-    posts = fetch_freelancehunt_api_posts(api_token="fh-token", pages=1, client=client)
+    posts = fetch_freelancehunt_api_posts(
+        api_token="fh-token",
+        pages=1,
+        skill_ids=[180, 169, 22],
+        client=client,
+    )
 
     assert len(posts) == 1
     assert posts[0].source == "freelancehunt_api"
     assert posts[0].post_id == "freelancehunt_api:1638118"
-    assert posts[0].url == "https://api.freelancehunt.com/v2/projects/1638118"
+    assert posts[0].url == "https://freelancehunt.com/project/ai-agent/1638118.html"
     assert "ШІ агент" in posts[0].text
     assert "Бюджет: 4000 UAH" in posts[0].text
     assert "Тип сделки: employer" in posts[0].text
     assert posts[0].published_at == "2026-06-28T13:06:11+03:00"
-    assert session.calls[0]["url"] == "https://api.freelancehunt.com/v2/projects?page[number]=1"
+    assert session.calls[0]["url"] == (
+        "https://api.freelancehunt.com/v2/projects?filter[skill_id]=180,169,22&page[number]=1"
+    )

@@ -93,9 +93,12 @@ class FreelancehuntClient:
         response.raise_for_status()
         return response.json()
 
-    def list_open_projects(self, *, page: int = 1) -> list[dict]:
+    def list_open_projects(self, *, page: int = 1, skill_ids: list[int] | None = None) -> list[dict]:
+        filters = ""
+        if skill_ids:
+            filters = f"filter[skill_id]={','.join(str(skill_id) for skill_id in skill_ids)}&"
         response = self.session.get(
-            f"{self.base_url}/projects?page[number]={max(1, page)}",
+            f"{self.base_url}/projects?{filters}page[number]={max(1, page)}",
             headers=self._headers(),
             timeout=30,
         )
@@ -225,12 +228,13 @@ def build_bid_preflight(*, profile: dict, project: dict) -> dict[str, Any]:
 def fetch_freelancehunt_api_posts(
     api_token: str,
     pages: int = 1,
+    skill_ids: list[int] | None = None,
     client: FreelancehuntClient | None = None,
 ) -> list[Post]:
     api = client or FreelancehuntClient(api_token=api_token)
     posts: list[Post] = []
     for page in range(1, min(5, max(1, pages)) + 1):
-        for item in api.list_open_projects(page=page):
+        for item in api.list_open_projects(page=page, skill_ids=skill_ids):
             post = _open_project_post(item)
             if post is not None:
                 posts.append(post)
@@ -253,7 +257,12 @@ def _open_project_post(item: dict) -> Post | None:
     if not project_id or not isinstance(name, str) or not name.strip():
         return None
     links = item.get("links") if isinstance(item.get("links"), dict) else {}
-    url = links.get("self") or f"{API_BASE_URL}/projects/{project_id}"
+    self_link = links.get("self")
+    if isinstance(self_link, dict):
+        url = self_link.get("web") or self_link.get("api")
+    else:
+        url = self_link
+    url = url or f"{API_BASE_URL}/projects/{project_id}"
     parts = [name.strip(), str(attributes.get("description") or "").strip()]
     if budget:
         parts.append(f"Бюджет: {budget.get('amount')} {budget.get('currency')}")

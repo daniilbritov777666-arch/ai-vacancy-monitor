@@ -92,6 +92,7 @@ def test_run_local_agent_uses_freelancehunt_api_instead_of_its_rss(tmp_path):
         freelancehunt_api_token="fh-token",
         freelancehunt_api_source_enabled=True,
         freelancehunt_api_pages=2,
+        freelancehunt_api_skill_ids=[180, 169],
         public_project_sources=[],
         public_source_probes=[],
         send_first_run=False,
@@ -111,11 +112,14 @@ def test_run_local_agent_uses_freelancehunt_api_instead_of_its_rss(tmp_path):
         fetch_posts=lambda channel: [],
         fetch_rss_posts=lambda feed: rss_calls.append(feed) or [],
         fetch_public_posts=lambda source: [],
-        fetch_freelancehunt_posts=lambda token, pages: api_calls.append((token, pages)) or [api_post],
+        fetch_freelancehunt_posts=lambda token, pages, skill_ids: api_calls.append(
+            (token, pages, skill_ids)
+        )
+        or [api_post],
         send_message=lambda text, reply_markup=None: None,
     )
 
-    assert api_calls == [("fh-token", 2)]
+    assert api_calls == [("fh-token", 2, [180, 169])]
     assert rss_calls == ["https://www.fl.ru/rss/projects.xml"]
     report = json.loads(
         (config.orders_path / "reports" / "public_sources_health.json").read_text(encoding="utf-8")

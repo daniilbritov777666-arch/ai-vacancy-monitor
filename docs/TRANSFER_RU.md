@@ -36,6 +36,7 @@
 - `AUTO_MODE=autopilot` - AI готовит файлы и переводит безопасный заказ в `draft_ready`, если цена не выше `AUTO_MAX_PRICE_RUB`.
 - `AUTO_OUTREACH_ENABLED=true` - агент может сам отправлять первый безопасный отклик через Freelancehunt API или опубликованный email.
 - `FREELANCEHUNT_API_SOURCE_ENABLED=true` и `FREELANCEHUNT_API_PAGES=1` - официальный API используется для поиска открытых проектов; дублирующий RSS Freelancehunt отключается автоматически.
+- `FREELANCEHUNT_API_SKILL_IDS=180,169,22,86,178,189,150,197` - серверный фильтр целевых навыков для ботов, парсинга, Python, данных, автоматизаций, CRM и AI-текстов.
 - API-источник пропускает проекты без поддерживаемой безопасной сделки и проекты с неподдерживаемой валютой. Сумма, валюта и тип сделки для ставки берутся из актуальных данных проекта.
 - Для Freelancehunt перед `POST /bids` выполняется profile/project preflight. Capability профиля сохраняется в `orders/reports/freelancehunt_profile_capabilities.json`, данные конкретного проекта - в `outbox/freelancehunt_preflight.json`.
 - `PUBLIC_PROJECT_SOURCES=freelance_ru,pchel` - включает дополнительные живые страницы разовых проектов.
