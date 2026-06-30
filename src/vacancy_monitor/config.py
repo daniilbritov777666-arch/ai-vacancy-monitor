@@ -9,7 +9,6 @@ DEFAULT_CHANNELS: list[str] = []
 
 DEFAULT_RSS_FEEDS = [
     "https://www.fl.ru/rss/projects.xml",
-    "https://freelancehunt.com/projects.rss",
 ]
 DEFAULT_PUBLIC_PROJECT_SOURCES = ["freelance_ru", "pchel", "weblancer"]
 DEFAULT_PUBLIC_SOURCE_PROBES = ["kwork", "workzilla"]
@@ -155,7 +154,7 @@ class Config:
         autonomous_default = auto_mode == "autopilot"
         freelancehunt_api_source_enabled = _env_bool(
             "FREELANCEHUNT_API_SOURCE_ENABLED",
-            default=autonomous_default,
+            default=False,
         )
         freelancehunt_api_pages = min(5, max(1, int(os.environ.get("FREELANCEHUNT_API_PAGES", "1"))))
         freelancehunt_api_skill_ids = _positive_int_csv(os.environ.get("FREELANCEHUNT_API_SKILL_IDS"))

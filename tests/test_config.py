@@ -10,6 +10,7 @@ def test_default_sources_are_project_feeds_only(monkeypatch):
 
     assert config.channels == []
     assert "https://www.fl.ru/rss/projects.xml" in config.rss_feeds
+    assert all("freelancehunt" not in feed for feed in config.rss_feeds)
     assert config.public_project_sources == ["freelance_ru", "pchel", "weblancer"]
     assert config.public_source_probes == ["kwork", "workzilla"]
 
@@ -79,7 +80,7 @@ def test_autopilot_mode_enables_autonomous_actions_by_default(monkeypatch):
     assert config.auto_revision_enabled is True
     assert config.auto_revision_per_order_limit == 3
     assert config.auto_status_report_enabled is True
-    assert config.freelancehunt_api_source_enabled is True
+    assert config.freelancehunt_api_source_enabled is False
     assert config.freelancehunt_api_pages == 1
     assert config.freelancehunt_api_skill_ids == []
     assert config.agent_queue_enabled is True
