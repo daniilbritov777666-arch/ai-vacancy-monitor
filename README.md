@@ -56,8 +56,8 @@
 Необязательные переменные в `Settings -> Secrets and variables -> Actions -> Variables`:
 
 - `TELEGRAM_CHANNELS` - список каналов через запятую. По умолчанию: `mari_vakansii,digitaltender,FreeVacanciesIT`.
-- `RSS_FEEDS` - список RSS-лент через запятую. При включенном API-источнике Freelancehunt его RSS автоматически исключается, чтобы не создавать дубли.
-- `PUBLIC_PROJECT_SOURCES` - живые HTML-источники проектов. По умолчанию: `freelance_ru,pchel`.
+- `RSS_FEEDS` - список RSS-лент через запятую. По умолчанию используется поток разовых заказов FL.ru.
+- `PUBLIC_PROJECT_SOURCES` - живые HTML-источники проектов. По умолчанию: `freelance_ru,pchel,weblancer`.
 - `PUBLIC_SOURCE_PROBES` - площадки только для проверки доступности. По умолчанию: `kwork,workzilla`.
 - `SEND_FIRST_RUN` - поставь `true`, если хочешь отправить подходящие посты уже при первом запуске. По умолчанию старые посты только помечаются просмотренными.
 
@@ -83,7 +83,7 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" PYTHONPATH=src python3 -m 
 - язык сообщений и документов: русский;
 - даты: `ДД.ММ.ГГГГ HH:MM МСК`;
 - суммы: рубли;
-- `AUTO_MODE=autopilot` включает автономный режим без Telegram-подтверждений для поддержанных Freelancehunt-действий;
+- `AUTO_MODE=autopilot` включает автономный режим без Telegram-подтверждений для поддержанных email- и платформенных каналов;
 - первый отклик, последующие ответы, подготовка результата, сдача результата, обработка правок и закрытие оплаченного заказа выполняются автоматически, если настроены токены и действие проходит safety-фильтр.
 
 Запуск одной проверки:
@@ -118,12 +118,11 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AGENT_JOBS_PER_CYCLE` - максимум фоновых задач за один проход. По умолчанию `3`, диапазон `1..20`.
 - `AGENT_JOB_MAX_ATTEMPTS` - максимум попыток задачи. По умолчанию `4`, диапазон `1..8`.
 - `AGENT_JOB_LEASE_SECONDS` - время аренды задачи worker-процессом. По умолчанию `600`, диапазон `30..3600`.
-- `AUTO_OUTREACH_ENABLED` - разрешает отправку через реально доступный канал. Для текущего Freelancehunt держите `false`: живой `POST /v2/projects/{project_id}/bids` возвращает `410` из-за deprecation. Email-отправка доступна только при рабочем SMTP.
+- `AUTO_OUTREACH_ENABLED` - разрешает отправку через реально доступный канал. Email отправляется только на адрес, который заказчик опубликовал в объявлении; платформенный проект без адаптера получает `contact_unavailable`, а не ложный статус отправки.
 - `AUTO_OUTREACH_DAILY_LIMIT` - дневной лимит автооткликов. По умолчанию `3`.
 - `AUTO_OUTREACH_MAX_AGE_HOURS` - максимальный возраст проекта для автоотклика. По умолчанию `24` часа.
-- Перед ставкой на Freelancehunt агент проверяет профиль и текущий статус проекта через API. Отчёт сохраняется в `outbox/freelancehunt_preflight.json`; несовместимые типы сделки блокируются до отправки.
-- `AUTO_CONVERSATION_ENABLED` - разрешает читать входящие треды Freelancehunt, сохранять их в `conversation.md`/`inbox/`, готовить AI-черновик ответа в `outbox/` и уведомлять Telegram. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
-- `AUTO_REPLY_ENABLED` - разрешает агенту самому отправлять безопасные последующие ответы в тред Freelancehunt. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
+- `AUTO_CONVERSATION_ENABLED` - разрешает читать доступные входящие email/платформенные сообщения, сохранять их в `conversation.md`/`inbox/` и готовить ответ. По умолчанию включено при `AUTO_MODE=autopilot`.
+- `AUTO_REPLY_ENABLED` - разрешает агенту отправлять безопасные последующие ответы через доступный транспорт. По умолчанию включено при `AUTO_MODE=autopilot`.
 - `AUTO_REPLY_DAILY_LIMIT` - дневной лимит автоответов в треды. По умолчанию `10`.
 - `AUTO_EXECUTION_ENABLED` - создает рабочий пакет выполнения в `execution/` после ответа заказчика: контекст, чеклист, заметки и стартовые файлы результата. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_EXECUTION_DRAFT_ENABLED` - генерирует AI-пакет результата в `execution/generated/` и сообщение сдачи в `outbox/delivery_message.md`. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
@@ -141,8 +140,8 @@ TELEGRAM_BOT_TOKEN="..." TELEGRAM_CHAT_ID="150761046" LOCAL_AGENT_LOOP=true PYTH
 - `AUTO_REVISION_DAILY_LIMIT` - дневной лимит автоматических правок. По умолчанию `5`.
 - `AUTO_STATUS_REPORT_ENABLED` - отправляет Telegram-отчет состояния агента с live-аудитом API Freelancehunt. По умолчанию включено при `AUTO_MODE=autopilot`, иначе выключено.
 - `AUTO_STATUS_REPORT_INTERVAL_MINUTES` - минимальный интервал между Telegram-отчетами. По умолчанию `360`.
-- `FREELANCEHUNT_API_TOKEN` - API-токен Freelancehunt для поиска, профиля, переписки и статусов. Endpoint создания новой ставки в API v2 отключён площадкой.
-- `FREELANCEHUNT_API_SOURCE_ENABLED` - получает открытые проекты напрямую через API. По умолчанию включено при `AUTO_MODE=autopilot`.
+- `FREELANCEHUNT_API_TOKEN` - legacy-параметр для чтения исторических сделок; production-runner его не загружает.
+- `FREELANCEHUNT_API_SOURCE_ENABLED` - legacy-источник, по умолчанию `false` и не включается режимом `autopilot`.
 - `FREELANCEHUNT_API_PAGES` - число проверяемых страниц API за цикл, от `1` до `5`. По умолчанию `1`.
 - `FREELANCEHUNT_API_SKILL_IDS` - skill ID через запятую для серверного отбора профильных проектов. Рабочий набор: `180,169,22,86,178,189,150,197` (боты, парсинг, Python, базы данных, обработка данных, автоматизация, CRM, AI-обработка текстов).
 - API-источник принимает только открытые разовые проекты без выбранного исполнителя, с поддерживаемой безопасной сделкой (`employer`, `developer`, `split`) и бюджетом в `UAH` или `RUB`. Цена и валюта сохраняются в подготовленном отклике.

@@ -27,7 +27,15 @@
     <key>ORDERS_PATH</key>
     <string>orders</string>
     <key>RSS_FEEDS</key>
-    <string>https://freelancehunt.com/projects.rss</string>
+    <string>https://www.fl.ru/rss/projects.xml</string>
+    <key>PUBLIC_PROJECT_SOURCES</key>
+    <string>freelance_ru,pchel,weblancer</string>
+    <key>PUBLIC_SOURCE_PROBES</key>
+    <string>kwork,workzilla</string>
+    <key>FREELANCEHUNT_API_SOURCE_ENABLED</key>
+    <string>false</string>
+    <key>FREELANCEHUNT_BID_API_ENABLED</key>
+    <string>false</string>
     <key>AUTO_MODE</key>
     <string>autopilot</string>
     <key>AUTO_MAX_PRICE_RUB</key>

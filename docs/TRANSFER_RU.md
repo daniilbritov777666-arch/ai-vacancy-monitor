@@ -34,20 +34,18 @@
 - `AUTO_MODE=off` - только поиск заказов и кнопки в Telegram.
 - `AUTO_MODE=draft` - AI готовит файлы в папке заказа, но статус заказа не продвигает.
 - `AUTO_MODE=autopilot` - AI готовит файлы и переводит безопасный заказ в `draft_ready`, если цена не выше `AUTO_MAX_PRICE_RUB`.
-- `AUTO_OUTREACH_ENABLED=false` - рабочее значение для текущего Freelancehunt: публичный API создания ставки отключён площадкой и возвращает `410 API v2 deprecation`. Поиск и подготовка отклика продолжаются; email можно включить после восстановления SMTP.
-- `FREELANCEHUNT_API_SOURCE_ENABLED=true` и `FREELANCEHUNT_API_PAGES=1` - официальный API используется для поиска открытых проектов; дублирующий RSS Freelancehunt отключается автоматически.
-- `FREELANCEHUNT_API_SKILL_IDS=180,169,22,86,178,189,150,197` - серверный фильтр целевых навыков для ботов, парсинга, Python, данных, автоматизаций, CRM и AI-текстов.
+- `AUTO_OUTREACH_ENABLED=true` - отправляет отклик только через подтверждённый email-транспорт; проекты без рабочего адаптера не считаются отправленными.
+- `FREELANCEHUNT_API_SOURCE_ENABLED=false` и `FREELANCEHUNT_BID_API_ENABLED=false` - Freelancehunt исключён из production-контура.
+- `RSS_FEEDS=https://www.fl.ru/rss/projects.xml` - основной RSS разовых проектов.
 - `PUBLIC_PROJECT_SOURCES=freelance_ru,pchel,weblancer` - публичные страницы одноразовых проектов; вакансии, крипто, дизайн и долгосрочная работа отсекаются до создания заказа.
-- API-источник пропускает проекты без поддерживаемой безопасной сделки и проекты с неподдерживаемой валютой. Сумма, валюта и тип сделки для ставки берутся из актуальных данных проекта.
-- Для Freelancehunt перед `POST /bids` выполняется profile/project preflight. Capability профиля сохраняется в `orders/reports/freelancehunt_profile_capabilities.json`, данные конкретного проекта - в `outbox/freelancehunt_preflight.json`.
-- `PUBLIC_PROJECT_SOURCES=freelance_ru,pchel` - включает дополнительные живые страницы разовых проектов.
+- Публичные источники импортируют только разовые технические проекты; email используется лишь когда заказчик сам опубликовал адрес.
 - `PUBLIC_SOURCE_PROBES=kwork,workzilla` - проверяет доступность площадок без импорта демонстрационных заданий.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_SSL` - канал первого email-отклика; если он не настроен, мониторинг источников все равно работает.
 - `IMAP_HOST`, `IMAP_PORT`, `IMAP_USERNAME`, `IMAP_PASSWORD`, `IMAP_FOLDER`, `IMAP_USE_SSL` - входящие email-ответы заказчиков; без IMAP email-канал работает только на первый отклик.
 - `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, `PAYMENT_RETURN_URL` - ЮKassa для внешних email-заказов.
 - `PAYMENT_INSTRUCTIONS_RU` - резервная РФ-инструкция оплаты для email-заказов без ЮKassa.
-- `AUTO_CONVERSATION_ENABLED=true` - агент читает входящие треды Freelancehunt и email-ответы заказчиков, сохраняет переписку, готовит AI-черновик ответа и уведомляет Telegram.
-- `AUTO_REPLY_ENABLED=true` - агент сам отправляет безопасные последующие ответы в тред Freelancehunt или по email.
+- `AUTO_CONVERSATION_ENABLED=true` - агент читает доступные email-ответы заказчиков, сохраняет переписку и готовит AI-ответ.
+- `AUTO_REPLY_ENABLED=true` - агент сам отправляет безопасные последующие ответы по email или через подключённый платформенный адаптер.
 - `AUTO_EXECUTION_ENABLED=true` - агент создает рабочий пакет выполнения и стартовые артефакты результата после ответа заказчика.
 - `AUTO_EXECUTION_DRAFT_ENABLED=true` - агент генерирует AI-пакет результата в `execution/generated/` и сообщение сдачи в `outbox/delivery_message.md`.
 - `AUTO_DELIVERY_ENABLED=true` - агент сам отправляет безопасный результат заказчику после генерации AI-пакета и переводит заказ в `payment_requested`.
@@ -56,11 +54,11 @@
 - `AUTO_QUALITY_ENABLED=true` - локальная и AI-проверка первоначального результата и автоправок до отправки.
 - `AUTO_QUALITY_MAX_REPAIRS=2` - две автоматические попытки исправить замечания; затем `quality_failed` без ручного согласования.
 - `EXECUTION_VERIFY_ENABLED=true` - обязательная изолированная проверка Python/JavaScript-файлов без сети и без записи в пакет.
-- `AUTO_PAYMENT_WATCH_ENABLED=true` - агент проверяет `/v2/my/bids`, распознает победившую ставку и финальный статус проекта.
+- `AUTO_PAYMENT_WATCH_ENABLED=true` - агент ведёт запросы оплаты и напоминания; факт оплаты подтверждается только внешним платёжным статусом или владельцем.
 - `AUTO_PAYMENT_REMINDER_ENABLED=true` - агент напоминает об оплате через 24/72 часа, ведёт `payment/reminders.json` и прекращает напоминания после сигнала оплаты.
 - `AUTO_REVISION_ENABLED=true` - агент сам обрабатывает безопасные правки после сдачи результата.
 - `AUTO_REVISION_DAILY_LIMIT=5` - дневной лимит автоматических правок.
-- `AUTO_STATUS_REPORT_ENABLED=true` - агент отправляет Telegram-отчет состояния с live-аудитом API Freelancehunt.
+- `AUTO_STATUS_REPORT_ENABLED=true` - агент отправляет Telegram-отчёт только по фактическим источникам, откликам, ответам, выполнению и оплате.
 - `AUTO_STATUS_REPORT_INTERVAL_MINUTES=360` - минимальный интервал между отчетами.
 - `AGENT_QUEUE_ENABLED=true` - AI-анализ заказов выполняется через устойчивую SQLite-очередь.
 - `AGENT_QUEUE_PATH=orders/agent_jobs.sqlite3` - runtime-БД планирования; не содержит клиентские файлы и не заменяет `state.json`.
