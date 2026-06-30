@@ -1794,7 +1794,11 @@ def test_marketplace_outreach_blocks_bid_when_preflight_project_is_not_open(tmp_
 
 def test_marketplace_outreach_sends_bid_after_open_project_preflight(tmp_path, monkeypatch):
     bids = []
-    config = replace(make_config(tmp_path), freelancehunt_api_token="fh-token")
+    config = replace(
+        make_config(tmp_path),
+        freelancehunt_api_token="fh-token",
+        freelancehunt_bid_api_enabled=True,
+    )
     store = OrderStore(config.orders_path)
     post = Post(
         source="freelancehunt.com/projects.rss",
@@ -1855,8 +1859,79 @@ def test_marketplace_outreach_sends_bid_after_open_project_preflight(tmp_path, m
     ]
 
 
+def test_marketplace_outreach_uses_browser_when_bid_api_is_disabled(tmp_path, monkeypatch):
+    browser_calls = []
+    config = replace(
+        make_config(tmp_path),
+        freelancehunt_api_token="fh-token",
+        freelancehunt_bid_api_enabled=False,
+        freelancehunt_browser_enabled=True,
+        freelancehunt_browser_live_submit=True,
+        freelancehunt_browser_profile_dir=tmp_path / "browser-profile",
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt_api",
+        post_id="freelancehunt_api:123456",
+        url="https://freelancehunt.com/project/bot/123456.html",
+        text="Нужен Telegram-бот, бюджет 15 000 руб.",
+        published_at="2026-06-30T10:00:00+03:00",
+    )
+    order = replace(make_order_from_post(post, category="Telegram-боты", risks=[]), price_rub=15000)
+    store.save_order(order)
+
+    class FakeApiClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def get_profile(self):
+            return {"data": {"id": 1965999, "type": "freelancer", "attributes": {"verification": {"email": True}}}}
+
+        def get_project(self, project_id):
+            return {
+                "data": {
+                    "id": project_id,
+                    "type": "project",
+                    "attributes": {
+                        "status": {"id": 11, "name": "Open for proposals"},
+                        "safe_type": "employer",
+                        "budget": {"amount": 4000, "currency": "UAH"},
+                        "freelancer": None,
+                    },
+                }
+            }
+
+    class FakeBrowserClient:
+        def __init__(self, **kwargs):
+            browser_calls.append(("init", kwargs))
+
+        def submit_bid(self, request):
+            browser_calls.append(("submit", request))
+            return local_agent_cli.BrowserBidResult(
+                status="submitted",
+                project_id=request.project_id,
+                submitted=True,
+                bid_reference="bid-16340000",
+            )
+
+    monkeypatch.setattr(local_agent_cli, "FreelancehuntClient", FakeApiClient)
+    monkeypatch.setattr(local_agent_cli, "FreelancehuntBrowserClient", FakeBrowserClient)
+
+    local_agent_cli._send_marketplace_outreach(config, order, "Готов выполнить задачу.")
+
+    request = next(item[1] for item in browser_calls if item[0] == "submit")
+    assert request.amount == 4000
+    assert request.currency == "UAH"
+    result_path = store.order_dir(order.order_id) / "outbox" / "freelancehunt_browser_result.json"
+    assert json.loads(result_path.read_text(encoding="utf-8"))["bid_reference"] == "bid-16340000"
+
+
 def test_open_project_bid_410_is_kept_for_profile_diagnostics(tmp_path, monkeypatch):
-    config = replace(make_config(tmp_path), freelancehunt_api_token="fh-token")
+    config = replace(
+        make_config(tmp_path),
+        freelancehunt_api_token="fh-token",
+        freelancehunt_bid_api_enabled=True,
+    )
     store = OrderStore(config.orders_path)
     post = Post(
         source="freelancehunt.com/projects.rss",

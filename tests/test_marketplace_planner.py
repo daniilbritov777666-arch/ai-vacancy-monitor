@@ -66,6 +66,29 @@ def test_marketplace_plan_explains_disabled_freelancehunt_outreach(tmp_path):
     assert "официальный API создания ставок отключен площадкой" in freelancehunt.blockers
 
 
+def test_marketplace_plan_accepts_live_browser_outreach_when_bid_api_is_disabled(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_token="fh-token",
+        freelancehunt_api_source_enabled=True,
+        freelancehunt_bid_api_enabled=False,
+        freelancehunt_browser_enabled=True,
+        freelancehunt_browser_live_submit=True,
+        auto_outreach_enabled=True,
+        auto_conversation_enabled=True,
+        auto_payment_watch_enabled=True,
+    )
+
+    plan = build_marketplace_plan(config=config, public_health=[])
+
+    freelancehunt = next(channel for channel in plan.channels if channel.key == "freelancehunt")
+    assert freelancehunt.outreach == "auto"
+    assert "официальный API создания ставок отключен площадкой" not in freelancehunt.blockers
+    assert plan.ready_channels == ["freelancehunt"]
+
+
 def test_marketplace_plan_uses_github_email_bridge_when_local_smtp_is_blocked(tmp_path):
     config = replace(
         make_config(tmp_path),

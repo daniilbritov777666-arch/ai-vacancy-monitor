@@ -124,19 +124,20 @@ def format_marketplace_plan(plan: MarketplaceAutopilotPlan) -> str:
 
 def _freelancehunt_channel(*, config: Config) -> MarketplaceChannel:
     blockers: list[str] = []
+    browser_ready = config.freelancehunt_browser_enabled and config.freelancehunt_browser_live_submit
     if not config.freelancehunt_api_token:
         blockers.append("нет FREELANCEHUNT_API_TOKEN")
     if config.auto_mode != "autopilot":
         blockers.append("AUTO_MODE не autopilot")
     if not config.openai_api_key:
         blockers.append("нет OPENAI_API_KEY")
-    if config.freelancehunt_api_token and not config.freelancehunt_bid_api_enabled:
+    if config.freelancehunt_api_token and not config.freelancehunt_bid_api_enabled and not browser_ready:
         blockers.append("официальный API создания ставок отключен площадкой")
     outreach = (
         "auto"
         if config.freelancehunt_api_token
         and config.auto_outreach_enabled
-        and config.freelancehunt_bid_api_enabled
+        and (config.freelancehunt_bid_api_enabled or browser_ready)
         else "blocked"
     )
     conversation = "auto" if config.freelancehunt_api_token and config.auto_conversation_enabled else "blocked"
@@ -159,7 +160,11 @@ def _freelancehunt_channel(*, config: Config) -> MarketplaceChannel:
         payment=payment,
         priority=1,
         blockers=blockers,
-        notes_ru="API поддерживает поиск и существующие сделки; создание новой ставки отключено площадкой.",
+        notes_ru=(
+            "Поиск и сделки идут через API; новые ставки отправляются локальным браузерным адаптером."
+            if browser_ready
+            else "API поддерживает поиск и существующие сделки; создание новой ставки отключено площадкой."
+        ),
     )
 
 

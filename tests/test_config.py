@@ -172,6 +172,24 @@ def test_freelancehunt_config_reads_env(monkeypatch):
     assert config.freelancehunt_bid_days == 3
 
 
+def test_freelancehunt_browser_config_reads_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("FREELANCEHUNT_BROWSER_ENABLED", "true")
+    monkeypatch.setenv("FREELANCEHUNT_BROWSER_LIVE_SUBMIT", "true")
+    monkeypatch.setenv("FREELANCEHUNT_BROWSER_PROFILE_DIR", str(tmp_path / "profile"))
+    monkeypatch.setenv("FREELANCEHUNT_BROWSER_EXECUTABLE_PATH", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    monkeypatch.setenv("FREELANCEHUNT_BROWSER_TIMEOUT_SECONDS", "180")
+
+    config = Config.from_env()
+
+    assert config.freelancehunt_browser_enabled is True
+    assert config.freelancehunt_browser_live_submit is True
+    assert config.freelancehunt_browser_profile_dir == tmp_path / "profile"
+    assert config.freelancehunt_browser_executable_path.endswith("Google Chrome")
+    assert config.freelancehunt_browser_timeout_seconds == 180
+
+
 def test_auto_outreach_config_reads_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")

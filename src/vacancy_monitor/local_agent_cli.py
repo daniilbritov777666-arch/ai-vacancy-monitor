@@ -58,6 +58,11 @@ from vacancy_monitor.freelancehunt import (
     build_bid_preflight,
     fetch_freelancehunt_api_posts,
 )
+from vacancy_monitor.freelancehunt_browser import (
+    BrowserBidRequest,
+    BrowserBidResult,
+    FreelancehuntBrowserClient,
+)
 from vacancy_monitor.models import MatchResult, Post
 from vacancy_monitor.job_queue import AgentJobQueue
 from vacancy_monitor.job_worker import (
@@ -2308,7 +2313,11 @@ def _maybe_auto_send_outreach(
         updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: контакт не опубликован.")
         return updated
-    if order.contact.channel == "freelancehunt" and not config.freelancehunt_bid_api_enabled:
+    if (
+        order.contact.channel == "freelancehunt"
+        and not config.freelancehunt_bid_api_enabled
+        and not _freelancehunt_browser_ready(config)
+    ):
         reason = "официальный API создания ставок отключен площадкой"
         if _write_outreach_channel_blocked(store=store, order=order, reason=reason):
             _safe_notify(sender, f"Автоотклик по заказу {order.order_id} отложен: {reason}.")
@@ -2879,15 +2888,43 @@ def _send_marketplace_outreach(config: Config, order: Order, text: str) -> None:
             and project_amount > 0
             and project_currency in {"UAH", "RUB"}
         )
+        amount = int(project_amount) if use_project_budget else (order.price_rub or config.auto_max_price_rub)
+        currency = project_currency if use_project_budget else "RUB"
+        safe_type = preflight["project"]["safe_type"] or config.freelancehunt_bid_safe_type
+        if config.freelancehunt_browser_enabled:
+            browser_result = FreelancehuntBrowserClient(
+                profile_dir=config.freelancehunt_browser_profile_dir,
+                artifacts_dir=config.orders_path / order.order_id / "outbox" / "browser",
+                live_submit=config.freelancehunt_browser_live_submit,
+                timeout_seconds=config.freelancehunt_browser_timeout_seconds,
+                executable_path=config.freelancehunt_browser_executable_path,
+            ).submit_bid(
+                BrowserBidRequest(
+                    order_id=order.order_id,
+                    project_id=order.contact.value,
+                    project_url=order.source_url,
+                    amount=amount,
+                    currency=currency,
+                    days=config.freelancehunt_bid_days,
+                    safe_type=safe_type,
+                    comment=text,
+                )
+            )
+            _write_freelancehunt_browser_result(config=config, order=order, result=browser_result)
+            if not browser_result.submitted:
+                raise RuntimeError(f"Freelancehunt browser did not submit bid: {browser_result.status}")
+            return
+        if not config.freelancehunt_bid_api_enabled:
+            raise RuntimeError("Freelancehunt bid API is disabled")
         try:
             client.add_bid(
                 project_id=order.contact.value,
                 bid=FreelancehuntBid(
                     days=config.freelancehunt_bid_days,
-                    amount=int(project_amount) if use_project_budget else (order.price_rub or config.auto_max_price_rub),
+                    amount=amount,
                     comment=text,
-                    safe_type=preflight["project"]["safe_type"] or config.freelancehunt_bid_safe_type,
-                    currency=project_currency if use_project_budget else "RUB",
+                    safe_type=safe_type,
+                    currency=currency,
                 ),
             )
         except Exception as exc:
@@ -2895,6 +2932,32 @@ def _send_marketplace_outreach(config: Config, order: Order, text: str) -> None:
             raise
         return
     raise RuntimeError(f"unsupported contact channel: {order.contact.channel}")
+
+
+def _freelancehunt_browser_ready(config: Config) -> bool:
+    return config.freelancehunt_browser_enabled and config.freelancehunt_browser_live_submit
+
+
+def _write_freelancehunt_browser_result(
+    *, config: Config, order: Order, result: BrowserBidResult
+) -> None:
+    path = config.orders_path / order.order_id / "outbox" / "freelancehunt_browser_result.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "checked_at": format_moscow_time(),
+                "status": result.status,
+                "project_id": result.project_id,
+                "submitted": result.submitted,
+                "bid_reference": result.bid_reference,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _write_freelancehunt_preflight(*, config: Config, order: Order, preflight: dict) -> None:

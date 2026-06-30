@@ -48,6 +48,7 @@ class FreelancehuntBrowserClient:
         artifacts_dir: Path,
         live_submit: bool,
         timeout_seconds: int = 120,
+        executable_path: str | None = None,
         worker_command: list[str] | None = None,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ) -> None:
@@ -55,6 +56,7 @@ class FreelancehuntBrowserClient:
         self.artifacts_dir = artifacts_dir
         self.live_submit = live_submit
         self.timeout_seconds = timeout_seconds
+        self.executable_path = executable_path
         self.worker_command = worker_command or [
             sys.executable,
             "-m",
@@ -68,6 +70,7 @@ class FreelancehuntBrowserClient:
             "profile_dir": str(self.profile_dir),
             "artifacts_dir": str(self.artifacts_dir),
             "live_submit": self.live_submit,
+            "executable_path": self.executable_path,
         }
         completed = self.runner(
             self.worker_command,
