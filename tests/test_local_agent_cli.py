@@ -134,12 +134,10 @@ def test_run_local_agent_writes_marketplace_autopilot_plan(tmp_path):
         make_config(tmp_path),
         auto_mode="autopilot",
         openai_api_key="sk-test",
-        freelancehunt_api_token="fh-token",
-        freelancehunt_bid_api_enabled=True,
         auto_outreach_enabled=True,
         auto_conversation_enabled=True,
         auto_payment_watch_enabled=True,
-        rss_feeds=["https://freelancehunt.com/projects.rss"],
+        rss_feeds=["https://www.fl.ru/rss/projects.xml"],
         public_project_sources=["freelance_ru"],
         public_source_probes=[],
         send_first_run=False,
@@ -156,8 +154,9 @@ def test_run_local_agent_writes_marketplace_autopilot_plan(tmp_path):
     report = json.loads(
         (config.orders_path / "reports" / "marketplace_autopilot_plan.json").read_text(encoding="utf-8")
     )
-    assert report["ready_channels"] == ["freelancehunt"]
-    assert report["channels"][0]["key"] == "freelancehunt"
+    assert report["ready_channels"] == []
+    assert report["channels"][0]["key"] == "fl_ru"
+    assert all(channel["key"] != "freelancehunt" for channel in report["channels"])
     assert (config.orders_path / "reports" / "marketplace_autopilot_plan.md").exists()
 
 

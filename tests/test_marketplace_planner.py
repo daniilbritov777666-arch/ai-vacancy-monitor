@@ -16,54 +16,26 @@ def make_config(tmp_path) -> Config:
         bot_token="token",
         chat_id="150761046",
         channels=[],
-        rss_feeds=["https://freelancehunt.com/projects.rss", "https://www.fl.ru/rss/projects.xml"],
+        rss_feeds=["https://www.fl.ru/rss/projects.xml"],
         state_path=tmp_path / "seen_posts.json",
         send_first_run=False,
         orders_path=tmp_path / "orders",
     )
 
 
-def test_marketplace_plan_marks_freelancehunt_as_full_autopilot_channel(tmp_path):
+def test_marketplace_plan_prioritizes_rf_channels_and_omits_freelancehunt(tmp_path):
     config = replace(
         make_config(tmp_path),
-        auto_mode="autopilot",
-        openai_api_key="sk-test",
-        freelancehunt_api_token="fh-token",
-        freelancehunt_api_source_enabled=True,
-        freelancehunt_bid_api_enabled=True,
-        rss_feeds=["https://www.fl.ru/rss/projects.xml"],
-        auto_outreach_enabled=True,
-        auto_conversation_enabled=True,
-        auto_payment_watch_enabled=True,
+        public_project_sources=["freelance_ru", "pchel", "weblancer"],
+        payment_instructions_ru="Оплата по СБП",
     )
 
     plan = build_marketplace_plan(config=config, public_health=[])
 
-    freelancehunt = next(channel for channel in plan.channels if channel.key == "freelancehunt")
-    assert freelancehunt.discovery == "enabled"
-    assert freelancehunt.outreach == "auto"
-    assert freelancehunt.conversation == "auto"
-    assert freelancehunt.payment == "platform_escrow_watch"
-    assert freelancehunt.priority == 1
-    assert not freelancehunt.blockers
-    assert plan.ready_channels == ["freelancehunt"]
-
-
-def test_marketplace_plan_explains_disabled_freelancehunt_outreach(tmp_path):
-    config = replace(
-        make_config(tmp_path),
-        auto_mode="autopilot",
-        openai_api_key="sk-test",
-        freelancehunt_api_token="fh-token",
-        auto_outreach_enabled=True,
-        freelancehunt_bid_api_enabled=False,
-    )
-
-    plan = build_marketplace_plan(config=config, public_health=[])
-
-    freelancehunt = next(channel for channel in plan.channels if channel.key == "freelancehunt")
-    assert freelancehunt.outreach == "blocked"
-    assert "официальный API создания ставок отключен площадкой" in freelancehunt.blockers
+    assert [channel.key for channel in plan.channels[:4]] == ["fl_ru", "freelance_ru", "pchel", "weblancer"]
+    assert all(channel.key != "freelancehunt" for channel in plan.channels)
+    assert "СБП" in plan.rf_payment_channels
+    assert "Freelancehunt" not in " ".join(plan.next_actions)
 
 
 def test_marketplace_plan_uses_github_email_bridge_when_local_smtp_is_blocked(tmp_path):
@@ -182,8 +154,7 @@ def test_marketplace_plan_blocks_email_auto_when_transport_is_unreachable(tmp_pa
 def test_marketplace_plan_reports_rf_payment_readiness(tmp_path):
     config = replace(
         make_config(tmp_path),
-        freelancehunt_api_token="fh-token",
-        auto_payment_watch_enabled=True,
+        payment_instructions_ru="Оплата по СБП: +7 900 000-00-00",
     )
 
     plan = build_marketplace_plan(
@@ -192,13 +163,13 @@ def test_marketplace_plan_reports_rf_payment_readiness(tmp_path):
         env={"YOOKASSA_SHOP_ID": "shop", "YOOKASSA_SECRET_KEY": "secret"},
     )
 
-    assert "Freelancehunt safe" in plan.rf_payment_channels
+    assert "СБП" in plan.rf_payment_channels
     assert "ЮKassa" in plan.rf_payment_channels
     assert "YOOKASSA_SHOP_ID" not in " ".join(plan.next_actions)
 
 
 def test_write_marketplace_plan_report_outputs_json_and_markdown(tmp_path):
-    config = replace(make_config(tmp_path), freelancehunt_api_token="fh-token")
+    config = make_config(tmp_path)
     plan = build_marketplace_plan(config=config, public_health=[])
 
     json_path, markdown_path = write_marketplace_plan_report(config.orders_path / "reports", plan)
@@ -206,6 +177,6 @@ def test_write_marketplace_plan_report_outputs_json_and_markdown(tmp_path):
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     text = markdown_path.read_text(encoding="utf-8")
     assert payload["checked_at"]
-    assert payload["channels"][0]["key"] == "freelancehunt"
+    assert payload["channels"][0]["key"] == "fl_ru"
     assert "План автопилота по биржам" in text
-    assert "Freelancehunt" in format_marketplace_plan(plan)
+    assert "Freelancehunt" not in format_marketplace_plan(plan)
