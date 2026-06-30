@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from vacancy_monitor.models import Post
 from vacancy_monitor.order_models import (
+    CustomerContact,
     OrderStatus,
     build_order_id,
     format_moscow_time,
@@ -99,3 +100,21 @@ def test_make_order_from_public_post_extracts_email_contact():
     assert order.contact.channel == "email"
     assert order.contact.value == "client@example.ru"
     assert order.contact.can_auto_send is True
+
+
+def test_make_order_from_platform_post_without_email_keeps_browser_route():
+    post = Post(
+        source="weblancer.net",
+        post_id="weblancer:1268001",
+        url="https://www.weblancer.net/freelance/sozdanie-botov-61/telegram-bot-1268001/",
+        text="Разовый проект: Telegram-бот для заявок.",
+        published_at="2026-06-30T12:00:00+03:00",
+    )
+
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+
+    assert order.contact == CustomerContact(
+        channel="platform_browser",
+        value="weblancer",
+        can_auto_send=False,
+    )

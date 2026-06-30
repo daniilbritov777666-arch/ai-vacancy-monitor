@@ -2304,6 +2304,12 @@ def _maybe_auto_send_outreach(
         updated = store.update_status(order.order_id, OrderStatus.SKIPPED)
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} пропущен: проект устарел.")
         return updated
+    if order.contact and order.contact.channel == "platform_browser" and not order.contact.can_auto_send:
+        reason = f"браузерный адаптер {order.contact.value} не настроен"
+        updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
+        if _write_outreach_channel_blocked(store=store, order=updated, reason=reason):
+            _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: {reason}.")
+        return updated
     if not order.contact or not order.contact.can_auto_send:
         updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: контакт не опубликован.")

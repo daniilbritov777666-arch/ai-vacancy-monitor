@@ -275,6 +275,41 @@ def test_auto_outreach_marks_order_without_contact_unavailable(tmp_path):
     assert store.load_order(order.order_id).status == OrderStatus.CONTACT_UNAVAILABLE
 
 
+def test_platform_browser_without_adapter_is_terminal_and_recorded(tmp_path):
+    notifications = []
+    send_attempts = []
+    config = replace(make_config(tmp_path), auto_outreach_enabled=True)
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="weblancer.net",
+        post_id="weblancer:1268001",
+        url="https://www.weblancer.net/freelance/sozdanie-botov-61/telegram-bot-1268001/",
+        text="Разовый проект: Telegram-бот для заявок.",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты"),
+        status=OrderStatus.DRAFT_READY,
+    )
+    store.save_order(order)
+
+    updated = local_agent_cli._maybe_auto_send_outreach(
+        config=config,
+        order=order,
+        store=store,
+        sender=lambda text, reply_markup=None: notifications.append(text),
+        send_outreach=lambda order, text: send_attempts.append((order, text)),
+    )
+
+    blocked = json.loads(
+        (store.order_dir(order.order_id) / "outbox" / "channel_blocked.json").read_text(encoding="utf-8")
+    )
+    assert updated.status == OrderStatus.CONTACT_UNAVAILABLE
+    assert blocked["channel"] == "platform_browser"
+    assert "адаптер" in blocked["reason"]
+    assert send_attempts == []
+    assert len(notifications) == 1
+
+
 def safe_autopilot_result() -> AutopilotResult:
     return AutopilotResult(
         safe_to_autopilot=True,

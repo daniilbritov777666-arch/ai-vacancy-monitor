@@ -8,6 +8,7 @@ from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from vacancy_monitor.models import Post
+from vacancy_monitor.marketplace_channels import channel_for_source
 
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
@@ -123,12 +124,15 @@ def _parse_post_datetime(value: str | None) -> datetime:
 
 
 def _contact_from_post(post: Post) -> CustomerContact | None:
-    project_id = _freelancehunt_project_id(post.url) or _freelancehunt_project_id(post.post_id)
-    if project_id:
-        return CustomerContact(channel="freelancehunt", value=project_id, can_auto_send=True)
     email_match = re.search(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+", post.text, flags=re.IGNORECASE)
     if email_match:
         return CustomerContact(channel="email", value=email_match.group(0), can_auto_send=True)
+    project_id = _freelancehunt_project_id(post.url) or _freelancehunt_project_id(post.post_id)
+    if project_id:
+        return CustomerContact(channel="freelancehunt", value=project_id, can_auto_send=True)
+    channel = channel_for_source(post.source)
+    if channel and channel.browser_outreach:
+        return CustomerContact(channel="platform_browser", value=channel.key, can_auto_send=False)
     return None
 
 
