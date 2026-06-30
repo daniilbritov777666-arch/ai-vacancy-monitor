@@ -206,6 +206,26 @@ def test_smtp_config_reads_env(monkeypatch):
     assert config.smtp_use_ssl is True
 
 
+def test_github_email_bridge_config_reads_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("GITHUB_EMAIL_BRIDGE_ENABLED", "true")
+    monkeypatch.setenv("GITHUB_EMAIL_BRIDGE_REPO", "owner/repo")
+    monkeypatch.setenv("GITHUB_EMAIL_BRIDGE_TOKEN", "github-token")
+    monkeypatch.setenv("GITHUB_EMAIL_BRIDGE_DISPATCH_REF", "main")
+    monkeypatch.setenv("GITHUB_EMAIL_BRIDGE_SOURCE_REF", "codex/public-project-sources")
+    monkeypatch.setenv("FREELANCEHUNT_BID_API_ENABLED", "false")
+
+    config = Config.from_env()
+
+    assert config.github_email_bridge_enabled is True
+    assert config.github_email_bridge_repo == "owner/repo"
+    assert config.github_email_bridge_token == "github-token"
+    assert config.github_email_bridge_dispatch_ref == "main"
+    assert config.github_email_bridge_source_ref == "codex/public-project-sources"
+    assert config.freelancehunt_bid_api_enabled is False
+
+
 def test_delivery_public_link_config_reads_env(monkeypatch, tmp_path):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")

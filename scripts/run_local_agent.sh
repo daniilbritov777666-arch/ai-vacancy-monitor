@@ -24,6 +24,7 @@ export SMTP_HOST="$(security find-generic-password -a vacancy-agent -s com.codex
 export SMTP_USERNAME="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.smtp-username -w 2>/dev/null || true)"
 export SMTP_PASSWORD="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.smtp-password -w 2>/dev/null || true)"
 export SMTP_FROM="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.smtp-from -w 2>/dev/null || true)"
+export GITHUB_EMAIL_BRIDGE_TOKEN="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.github-email-bridge-token -w 2>/dev/null || true)"
 export IMAP_HOST="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.imap-host -w 2>/dev/null || true)"
 export IMAP_USERNAME="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.imap-username -w 2>/dev/null || true)"
 export IMAP_PASSWORD="$(security find-generic-password -a vacancy-agent -s com.codex.vacancy-agent.imap-password -w 2>/dev/null || true)"

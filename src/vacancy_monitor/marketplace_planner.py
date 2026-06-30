@@ -130,9 +130,15 @@ def _freelancehunt_channel(*, config: Config) -> MarketplaceChannel:
         blockers.append("AUTO_MODE не autopilot")
     if not config.openai_api_key:
         blockers.append("нет OPENAI_API_KEY")
-    if config.freelancehunt_api_token and not config.auto_outreach_enabled:
+    if config.freelancehunt_api_token and not config.freelancehunt_bid_api_enabled:
         blockers.append("официальный API создания ставок отключен площадкой")
-    outreach = "auto" if config.freelancehunt_api_token and config.auto_outreach_enabled else "blocked"
+    outreach = (
+        "auto"
+        if config.freelancehunt_api_token
+        and config.auto_outreach_enabled
+        and config.freelancehunt_bid_api_enabled
+        else "blocked"
+    )
     conversation = "auto" if config.freelancehunt_api_token and config.auto_conversation_enabled else "blocked"
     payment = (
         "platform_escrow_watch"
@@ -187,14 +193,20 @@ def _public_email_channel(
         blockers.append("источник не включен")
     if health and health.status != "available":
         blockers.append(f"источник недоступен: {health.status}")
-    if not (config.smtp_host and config.smtp_from):
+    bridge_ready = bool(
+        config.github_email_bridge_enabled
+        and config.github_email_bridge_repo
+        and config.github_email_bridge_token
+        and config.smtp_from
+    )
+    if not ((config.smtp_host and config.smtp_from) or bridge_ready):
         blockers.append("SMTP не настроен")
     if not config.imap_host:
         blockers.append("IMAP не настроен")
-    smtp_ready = bool(config.smtp_host and config.smtp_from)
+    smtp_ready = bool(config.smtp_host and config.smtp_from) or bridge_ready
     imap_ready = bool(config.imap_host and config.smtp_host and config.smtp_from)
     if email_health is not None:
-        if smtp_ready and not email_health.smtp_reachable:
+        if smtp_ready and not bridge_ready and not email_health.smtp_reachable:
             blockers.append(f"SMTP недоступен: {email_health.smtp_error or 'connection failed'}")
             smtp_ready = False
         if imap_ready and not email_health.imap_reachable:

@@ -35,6 +35,7 @@ class Config:
     freelancehunt_api_source_enabled: bool = False
     freelancehunt_api_pages: int = 1
     freelancehunt_api_skill_ids: list[int] = field(default_factory=list)
+    freelancehunt_bid_api_enabled: bool = False
     auto_outreach_enabled: bool = False
     auto_outreach_daily_limit: int = 3
     auto_outreach_max_age_hours: int = 24
@@ -62,6 +63,12 @@ class Config:
     smtp_password: str = ""
     smtp_from: str | None = None
     smtp_use_ssl: bool = False
+    github_email_bridge_enabled: bool = False
+    github_email_bridge_repo: str = ""
+    github_email_bridge_token: str = ""
+    github_email_bridge_workflow: str = "email-bridge.yml"
+    github_email_bridge_dispatch_ref: str = "main"
+    github_email_bridge_source_ref: str = "main"
     imap_host: str | None = None
     imap_port: int = 993
     imap_username: str = ""
@@ -107,6 +114,12 @@ class Config:
         smtp_password = os.environ.get("SMTP_PASSWORD", "")
         smtp_from = os.environ.get("SMTP_FROM", "").strip() or None
         smtp_use_ssl = _env_bool("SMTP_USE_SSL")
+        github_email_bridge_enabled = _env_bool("GITHUB_EMAIL_BRIDGE_ENABLED")
+        github_email_bridge_repo = os.environ.get("GITHUB_EMAIL_BRIDGE_REPO", "").strip()
+        github_email_bridge_token = os.environ.get("GITHUB_EMAIL_BRIDGE_TOKEN", "").strip()
+        github_email_bridge_workflow = os.environ.get("GITHUB_EMAIL_BRIDGE_WORKFLOW", "email-bridge.yml").strip()
+        github_email_bridge_dispatch_ref = os.environ.get("GITHUB_EMAIL_BRIDGE_DISPATCH_REF", "main").strip()
+        github_email_bridge_source_ref = os.environ.get("GITHUB_EMAIL_BRIDGE_SOURCE_REF", "main").strip()
         imap_host = os.environ.get("IMAP_HOST", "").strip() or None
         imap_port = int(os.environ.get("IMAP_PORT", "993"))
         imap_username = os.environ.get("IMAP_USERNAME", "").strip()
@@ -146,6 +159,7 @@ class Config:
         )
         freelancehunt_api_pages = min(5, max(1, int(os.environ.get("FREELANCEHUNT_API_PAGES", "1"))))
         freelancehunt_api_skill_ids = _positive_int_csv(os.environ.get("FREELANCEHUNT_API_SKILL_IDS"))
+        freelancehunt_bid_api_enabled = _env_bool("FREELANCEHUNT_BID_API_ENABLED")
         auto_outreach_enabled = _env_bool("AUTO_OUTREACH_ENABLED", default=autonomous_default)
         auto_outreach_daily_limit = int(os.environ.get("AUTO_OUTREACH_DAILY_LIMIT", "3"))
         auto_outreach_max_age_hours = int(os.environ.get("AUTO_OUTREACH_MAX_AGE_HOURS", "24"))
@@ -207,6 +221,7 @@ class Config:
             freelancehunt_api_source_enabled=freelancehunt_api_source_enabled,
             freelancehunt_api_pages=freelancehunt_api_pages,
             freelancehunt_api_skill_ids=freelancehunt_api_skill_ids,
+            freelancehunt_bid_api_enabled=freelancehunt_bid_api_enabled,
             auto_outreach_enabled=auto_outreach_enabled,
             auto_outreach_daily_limit=auto_outreach_daily_limit,
             auto_outreach_max_age_hours=auto_outreach_max_age_hours,
@@ -234,6 +249,12 @@ class Config:
             smtp_password=smtp_password,
             smtp_from=smtp_from,
             smtp_use_ssl=smtp_use_ssl,
+            github_email_bridge_enabled=github_email_bridge_enabled,
+            github_email_bridge_repo=github_email_bridge_repo,
+            github_email_bridge_token=github_email_bridge_token,
+            github_email_bridge_workflow=github_email_bridge_workflow,
+            github_email_bridge_dispatch_ref=github_email_bridge_dispatch_ref,
+            github_email_bridge_source_ref=github_email_bridge_source_ref,
             imap_host=imap_host,
             imap_port=imap_port,
             imap_username=imap_username,

@@ -30,6 +30,7 @@ def test_marketplace_plan_marks_freelancehunt_as_full_autopilot_channel(tmp_path
         openai_api_key="sk-test",
         freelancehunt_api_token="fh-token",
         freelancehunt_api_source_enabled=True,
+        freelancehunt_bid_api_enabled=True,
         rss_feeds=["https://www.fl.ru/rss/projects.xml"],
         auto_outreach_enabled=True,
         auto_conversation_enabled=True,
@@ -54,7 +55,8 @@ def test_marketplace_plan_explains_disabled_freelancehunt_outreach(tmp_path):
         auto_mode="autopilot",
         openai_api_key="sk-test",
         freelancehunt_api_token="fh-token",
-        auto_outreach_enabled=False,
+        auto_outreach_enabled=True,
+        freelancehunt_bid_api_enabled=False,
     )
 
     plan = build_marketplace_plan(config=config, public_health=[])
@@ -62,6 +64,33 @@ def test_marketplace_plan_explains_disabled_freelancehunt_outreach(tmp_path):
     freelancehunt = next(channel for channel in plan.channels if channel.key == "freelancehunt")
     assert freelancehunt.outreach == "blocked"
     assert "официальный API создания ставок отключен площадкой" in freelancehunt.blockers
+
+
+def test_marketplace_plan_uses_github_email_bridge_when_local_smtp_is_blocked(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        public_project_sources=["freelance_ru"],
+        smtp_from="robot@example.ru",
+        github_email_bridge_enabled=True,
+        github_email_bridge_repo="owner/repo",
+        github_email_bridge_token="token",
+    )
+    email_health = EmailTransportHealth(
+        checked_at="2026-06-30T10:00:00+03:00",
+        status="unavailable",
+        smtp_configured=True,
+        imap_configured=False,
+        smtp_host="smtp.yandex.ru",
+        smtp_port=465,
+        smtp_reachable=False,
+        smtp_error="TimeoutError: timed out",
+    )
+
+    plan = build_marketplace_plan(config=config, public_health=[], email_health=email_health)
+
+    freelance_ru = next(channel for channel in plan.channels if channel.key == "freelance_ru")
+    assert freelance_ru.outreach == "email_auto"
+    assert not any("SMTP недоступен" in blocker for blocker in freelance_ru.blockers)
 
 
 def test_marketplace_plan_keeps_public_sources_discovery_only_without_email_sender(tmp_path):

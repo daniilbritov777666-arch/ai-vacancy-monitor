@@ -42,6 +42,7 @@ from vacancy_monitor.email_inbound import (
     write_email_reply_sent_record,
 )
 from vacancy_monitor.email_outreach import SMTPOutreachClient
+from vacancy_monitor.github_email_bridge import GitHubEmailBridge
 from vacancy_monitor.email_transport_health import (
     EmailTransportHealth,
     probe_email_transport,
@@ -291,7 +292,7 @@ def run_local_agent_once(
     )
     outreach_sender = send_outreach or (
         (lambda order, text: _send_marketplace_outreach(config, order, text))
-        if config.freelancehunt_api_token or (config.smtp_host and config.smtp_from)
+        if config.freelancehunt_api_token or _email_sender_configured(config)
         else None
     )
 
@@ -2307,7 +2308,12 @@ def _maybe_auto_send_outreach(
         updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: контакт не опубликован.")
         return updated
-    email_block_reason = _email_outreach_block_reason(order=order, email_health=email_health)
+    if order.contact.channel == "freelancehunt" and not config.freelancehunt_bid_api_enabled:
+        reason = "официальный API создания ставок отключен площадкой"
+        if _write_outreach_channel_blocked(store=store, order=order, reason=reason):
+            _safe_notify(sender, f"Автоотклик по заказу {order.order_id} отложен: {reason}.")
+        return order
+    email_block_reason = _email_outreach_block_reason(config=config, order=order, email_health=email_health)
     if email_block_reason:
         if _write_outreach_channel_blocked(store=store, order=order, reason=email_block_reason):
             _safe_notify(sender, f"Автоотклик по заказу {order.order_id} отложен: {email_block_reason}.")
@@ -2391,8 +2397,12 @@ def _write_outreach_channel_blocked(*, store: OrderStore, order: Order, reason: 
     return True
 
 
-def _email_outreach_block_reason(*, order: Order, email_health: EmailTransportHealth | None) -> str | None:
+def _email_outreach_block_reason(
+    *, config: Config, order: Order, email_health: EmailTransportHealth | None
+) -> str | None:
     if not order.contact or order.contact.channel != "email" or email_health is None:
+        return None
+    if _github_email_bridge_configured(config):
         return None
     if not email_health.smtp_configured:
         return "SMTP не настроен"
@@ -2797,17 +2807,17 @@ def run_local_agent_loop(
     offset: int | None = None
     send_outreach = (
         (lambda order, text: _send_marketplace_outreach(config, order, text))
-        if config.freelancehunt_api_token or (config.smtp_host and config.smtp_from)
+        if config.freelancehunt_api_token or _email_sender_configured(config)
         else None
     )
     send_delivery = (
         (lambda order, text: _send_marketplace_delivery(config, order, text))
-        if config.freelancehunt_api_token or (config.smtp_host and config.smtp_from)
+        if config.freelancehunt_api_token or _email_sender_configured(config)
         else None
     )
     send_payment_reminder = (
         (lambda order, text: _send_marketplace_followup(config, order, text))
-        if config.freelancehunt_api_token or (config.smtp_host and config.smtp_from)
+        if config.freelancehunt_api_token or _email_sender_configured(config)
         else None
     )
     while True:
@@ -2835,6 +2845,9 @@ def _send_marketplace_outreach(config: Config, order: Order, text: str) -> None:
     if not order.contact:
         raise RuntimeError("order has no contact")
     if order.contact.channel == "email":
+        if _github_email_bridge_configured(config):
+            _github_email_bridge(config).send(order, text)
+            return
         if not config.smtp_host or not config.smtp_from:
             raise RuntimeError("SMTP_HOST and SMTP_FROM are required")
         SMTPOutreachClient(
@@ -2910,6 +2923,9 @@ def _send_marketplace_delivery(config: Config, order: Order, text: str) -> None:
     if not order.contact:
         raise RuntimeError("order has no contact")
     if order.contact.channel == "email":
+        if _github_email_bridge_configured(config):
+            _github_email_bridge(config).send(order, text)
+            return
         if not config.smtp_host or not config.smtp_from:
             raise RuntimeError("SMTP_HOST and SMTP_FROM are required")
         archive_path = config.orders_path / order.order_id / "outbox" / "delivery_package.zip"
@@ -2940,6 +2956,9 @@ def _send_marketplace_followup(config: Config, order: Order, text: str) -> None:
     if not order.contact:
         raise RuntimeError("order has no contact")
     if order.contact.channel == "email":
+        if _github_email_bridge_configured(config):
+            _github_email_bridge(config).send(order, text)
+            return
         if not config.smtp_host or not config.smtp_from:
             raise RuntimeError("SMTP_HOST and SMTP_FROM are required")
         SMTPOutreachClient(
@@ -2962,6 +2981,30 @@ def _send_marketplace_followup(config: Config, order: Order, text: str) -> None:
             client.add_thread_message(thread_id=thread.thread_id, message_html=text)
             return
     raise RuntimeError("matching Freelancehunt thread not found")
+
+
+def _github_email_bridge_configured(config: Config) -> bool:
+    return bool(
+        config.github_email_bridge_enabled
+        and config.github_email_bridge_repo
+        and config.github_email_bridge_token
+        and config.smtp_from
+    )
+
+
+def _email_sender_configured(config: Config) -> bool:
+    return bool((config.smtp_host and config.smtp_from) or _github_email_bridge_configured(config))
+
+
+def _github_email_bridge(config: Config) -> GitHubEmailBridge:
+    return GitHubEmailBridge(
+        repo=config.github_email_bridge_repo,
+        token=config.github_email_bridge_token,
+        workflow=config.github_email_bridge_workflow,
+        dispatch_ref=config.github_email_bridge_dispatch_ref,
+        source_ref=config.github_email_bridge_source_ref,
+        from_email=config.smtp_from or "",
+    )
 
 
 def main() -> int:
