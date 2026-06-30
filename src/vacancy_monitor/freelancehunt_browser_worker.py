@@ -86,6 +86,9 @@ class PlaywrightBidPage:
         return self.page.locator(self.LOGIN_SELECTOR).count() > 0
 
     def has_captcha(self) -> bool:
+        title = self.page.title().strip().lower()
+        if "__cf_chl_" in self.page.url or title == "just a moment...":
+            return True
         return self.page.locator(self.CAPTCHA_SELECTOR).count() > 0
 
     def existing_bid_reference(self) -> str | None:

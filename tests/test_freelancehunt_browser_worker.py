@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from vacancy_monitor.freelancehunt_browser import BrowserBidRequest
-from vacancy_monitor.freelancehunt_browser_worker import execute_bid
+from vacancy_monitor.freelancehunt_browser_worker import PlaywrightBidPage, execute_bid
 
 
 def request() -> BrowserBidRequest:
@@ -108,3 +108,22 @@ def test_execute_bid_live_returns_verified_reference(tmp_path):
     assert result["submitted"] is True
     assert result["bid_reference"] == "bid-16340000"
     assert ("screenshot", "browser_bid_after.png") in page.calls
+
+
+def test_playwright_page_detects_cloudflare_challenge():
+    class Locator:
+        def count(self):
+            return 0
+
+    class RawPage:
+        url = "https://freelancehunt.com/project/example/1.html?__cf_chl_rt_tk=token"
+
+        def title(self):
+            return "Just a moment..."
+
+        def locator(self, selector):
+            return Locator()
+
+    page = PlaywrightBidPage(RawPage())
+
+    assert page.has_captcha() is True

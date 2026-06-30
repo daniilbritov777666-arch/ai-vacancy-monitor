@@ -200,6 +200,25 @@ PYTHONPATH=src python3 -m vacancy_monitor.business_setup
 
 Подробная инструкция по регистрации и подключению: `docs/MARKETPLACES_PAYMENTS_RU.md`.
 
+### Браузерный канал Freelancehunt
+
+Публичный API v2 больше не создает ставки. Для отправки через сайт используется отдельный постоянный профиль Chrome:
+
+```bash
+./scripts/setup_freelancehunt_browser.sh
+```
+
+В открывшемся окне нужно один раз войти в Freelancehunt и закрыть Chrome. Агент не обходит CAPTCHA или 2FA. После успешного dry-run включаются переменные:
+
+```bash
+FREELANCEHUNT_BROWSER_ENABLED=true
+FREELANCEHUNT_BROWSER_LIVE_SUBMIT=true
+FREELANCEHUNT_BROWSER_PROFILE_DIR="$HOME/.codex/freelancehunt-browser-profile"
+FREELANCEHUNT_BROWSER_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+```
+
+API-проверка проекта, лимит цены, риски, возраст проекта и дневной лимит выполняются до открытия браузера.
+
 ## Ограничения
 
 GitHub Actions schedule не гарантирует запуск ровно в секунду и не умеет чаще одного раза в 5 минут. Приватные Telegram-каналы через `t.me/s` не читаются; бот увидит только публичные веб-доступные посты.

@@ -106,6 +106,8 @@ AI-слой пишет:
 
 Важно: автоматическая отправка последующих сообщений включается отдельно через `AUTO_REPLY_ENABLED=true`, автосдача результата - через `AUTO_DELIVERY_ENABLED=true`, автоправки - через `AUTO_REVISION_ENABLED=true`, watcher статуса - через `AUTO_PAYMENT_WATCH_ENABLED=true`, Telegram-отчет - через `AUTO_STATUS_REPORT_ENABLED=true`. В `autopilot` рискованные и неопределенные заказы автоматически получают статус `skipped`, а заказ без рабочего канала связи - `contact_unavailable`, без запроса ручного подтверждения. Полный email-цикл требует SMTP для отправки и IMAP для входящих ответов; закрытие заказа на Freelancehunt выполняется только для победившей ставки при финальном статусе проекта из API. Фактическое поступление денег проверяется на балансе биржи.
 
+Если API создания ставок Freelancehunt отключен, выполните `./scripts/setup_freelancehunt_browser.sh`, один раз войдите в отдельном профиле Chrome и закройте окно. Затем включите `FREELANCEHUNT_BROWSER_ENABLED=true` и только после успешного dry-run - `FREELANCEHUNT_BROWSER_LIVE_SUBMIT=true`. CAPTCHA и 2FA автоматически не обходятся.
+
 После запуска смотри `orders/reports/marketplace_autopilot_plan.md`: там агент сам отмечает, какие биржи готовы к полному автопилоту, какие работают только как источники поиска, какие блокируются отсутствием API/SMTP, и какие РФ-платежные каналы доступны.
 
 ## Быстрый запуск на новом Mac
