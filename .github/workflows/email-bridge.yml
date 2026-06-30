@@ -1,0 +1,43 @@
+name: Email bridge
+run-name: email-bridge-${{ inputs.job_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Non-sensitive local job identifier
+        required: true
+        type: string
+      source_ref:
+        description: Repository ref containing the worker
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: email-bridge
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Send email
+        env:
+          EMAIL_BRIDGE_PAYLOAD: ${{ secrets.EMAIL_BRIDGE_PAYLOAD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_USE_SSL: ${{ secrets.SMTP_USE_SSL }}
+        run: PYTHONPATH=src python -m vacancy_monitor.email_bridge_worker
