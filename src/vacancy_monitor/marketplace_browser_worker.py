@@ -23,6 +23,8 @@ class MarketplaceSelectors:
     message_text: str
     reply: str
     reply_submit: str
+    outreach_open_text: str | None = None
+    auth_texts: tuple[str, ...] = ()
 
 
 SELECTORS = {
@@ -38,6 +40,8 @@ SELECTORS = {
         message_text='[data-message-text], .message__text, .b-post-message__text, .text',
         reply='textarea[name*="message"], textarea[name*="text"], textarea',
         reply_submit='button[type="submit"], input[type="submit"]',
+        outreach_open_text=None,
+        auth_texts=(),
     ),
     "freelance_ru": MarketplaceSelectors(
         login_url="https://freelance.ru/login/",
@@ -51,6 +55,8 @@ SELECTORS = {
         message_text='[data-message-text], .message-text, .message__text, .text',
         reply='textarea[name*="message"], textarea[name*="text"], textarea',
         reply_submit='button[type="submit"], input[type="submit"]',
+        outreach_open_text=None,
+        auth_texts=(),
     ),
     "weblancer": MarketplaceSelectors(
         login_url="https://www.weblancer.net/account/login/",
@@ -64,6 +70,8 @@ SELECTORS = {
         message_text='[data-message-text], .message-text, .message__text, .text',
         reply='textarea[name*="message"], textarea[name*="text"], textarea',
         reply_submit='button[type="submit"], input[type="submit"]',
+        outreach_open_text="Добавить заявку",
+        auth_texts=("Авторизуйтесь для подачи заявки",),
     ),
 }
 
@@ -97,7 +105,9 @@ class PlaywrightOutreachPage:
     def auth_required(self) -> bool:
         if any(marker in self.page.url for marker in ("/login", "/signin", "/auth")):
             return True
-        return any(self.page.locator(selector).count() > 0 for selector in self.selectors.login_markers)
+        if any(self.page.locator(selector).count() > 0 for selector in self.selectors.login_markers):
+            return True
+        return any(self.page.get_by_text(text, exact=False).count() > 0 for text in self.selectors.auth_texts)
 
     def captcha_required(self) -> bool:
         title = self.page.title().strip().lower()
@@ -106,7 +116,16 @@ class PlaywrightOutreachPage:
         return self.page.locator(self.CAPTCHA_SELECTOR).count() > 0
 
     def fill(self, request: BrowserOutreachRequest) -> None:
-        message = _unique(self.page.locator(self.selectors.message), "outreach message")
+        message_locator = self.page.locator(self.selectors.message)
+        if message_locator.count() == 0 and self.selectors.outreach_open_text:
+            opener = _unique(
+                self.page.get_by_role("button", name=self.selectors.outreach_open_text),
+                "outreach open",
+            )
+            opener.click()
+            self.page.wait_for_timeout(250)
+            message_locator = self.page.locator(self.selectors.message)
+        message = _unique(message_locator, "outreach message")
         self.form = message.locator("xpath=ancestor::form[1]")
         if self.form.count() != 1:
             raise BrowserLayoutError("outreach form not found")

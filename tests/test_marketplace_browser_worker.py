@@ -70,6 +70,8 @@ def test_supported_marketplaces_have_distinct_selector_contracts():
     assert selectors_for("weblancer").login_url == "https://www.weblancer.net/account/login/"
     assert 'input[name="amount"]' in selectors_for("weblancer").amount
     assert 'button[type="button"]' in selectors_for("weblancer").submit
+    assert selectors_for("weblancer").outreach_open_text == "Добавить заявку"
+    assert "Авторизуйтесь для подачи заявки" in selectors_for("weblancer").auth_texts
 
 
 def test_dry_run_fills_and_screenshots_without_submit(tmp_path):
