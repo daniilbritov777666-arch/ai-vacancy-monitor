@@ -1,7 +1,13 @@
 from pathlib import Path
 
-from vacancy_monitor.marketplace_browser import BrowserOutreachRequest
-from vacancy_monitor.marketplace_browser_worker import PlaywrightOutreachPage, execute_outreach, selectors_for
+from vacancy_monitor.marketplace_browser import BrowserConversationRequest, BrowserOutreachRequest, BrowserReplyRequest
+from vacancy_monitor.marketplace_browser_worker import (
+    PlaywrightOutreachPage,
+    execute_list_messages,
+    execute_outreach,
+    execute_reply,
+    selectors_for,
+)
 
 
 def request(channel="freelance_ru"):
@@ -16,10 +22,11 @@ def request(channel="freelance_ru"):
 
 
 class FakePage:
-    def __init__(self, *, auth=False, captcha=False, reference=None):
+    def __init__(self, *, auth=False, captcha=False, reference=None, messages=None):
         self.auth = auth
         self.captcha = captcha
         self.reference = reference
+        self.messages_result = messages or []
         self.calls = []
 
     def open(self, url):
@@ -41,6 +48,19 @@ class FakePage:
         self.calls.append(("submit",))
 
     def submission_reference(self):
+        return self.reference
+
+    def messages(self):
+        self.calls.append(("messages",))
+        return self.messages_result
+
+    def fill_reply(self, reply):
+        self.calls.append(("fill_reply", reply.message))
+
+    def submit_reply(self):
+        self.calls.append(("submit_reply",))
+
+    def reply_reference(self):
         return self.reference
 
 
@@ -110,3 +130,62 @@ def test_playwright_page_detects_cloudflare_and_login_marker():
 
     assert page.captcha_required() is True
     assert page.auth_required() is True
+
+
+def test_list_messages_returns_normalized_customer_messages(tmp_path):
+    page = FakePage(
+        messages=[
+            {"message_id": "m-7", "author": "customer", "text": "Когда начнете?", "created_at": None}
+        ]
+    )
+    conversation = BrowserConversationRequest(
+        order_id="order-1",
+        channel="freelance_ru",
+        project_url="https://freelance.ru/task/view/4171",
+    )
+
+    result = execute_list_messages(page=page, request=conversation, artifacts_dir=tmp_path)
+
+    assert result == {
+        "status": "messages_read",
+        "order_id": "order-1",
+        "messages": [
+            {"message_id": "m-7", "author": "customer", "text": "Когда начнете?", "created_at": None}
+        ],
+    }
+    assert ("screenshot", "browser_conversation.png") in page.calls
+
+
+def test_list_messages_stops_on_auth_and_captcha(tmp_path):
+    request = BrowserConversationRequest("order-1", "freelance_ru", "https://freelance.ru/task/view/4171")
+
+    auth = execute_list_messages(page=FakePage(auth=True), request=request, artifacts_dir=tmp_path)
+    captcha = execute_list_messages(page=FakePage(captcha=True), request=request, artifacts_dir=tmp_path)
+
+    assert auth["status"] == "auth_required"
+    assert captcha["status"] == "captcha_required"
+
+
+def test_reply_dry_run_and_live_submission_require_verification(tmp_path):
+    request = BrowserReplyRequest(
+        order_id="order-1",
+        channel="freelance_ru",
+        project_url="https://freelance.ru/task/view/4171",
+        message="Здравствуйте! Начну сегодня.",
+    )
+    dry_page = FakePage()
+    dry = execute_reply(page=dry_page, request=request, artifacts_dir=tmp_path, live_submit=False)
+    unverified = execute_reply(page=FakePage(), request=request, artifacts_dir=tmp_path, live_submit=True)
+    verified = execute_reply(
+        page=FakePage(reference="reply-7"), request=request, artifacts_dir=tmp_path, live_submit=True
+    )
+
+    assert dry == {"status": "reply_dry_run", "submitted": False, "order_id": "order-1"}
+    assert ("submit_reply",) not in dry_page.calls
+    assert unverified["status"] == "reply_unverified"
+    assert verified == {
+        "status": "reply_submitted",
+        "submitted": True,
+        "order_id": "order-1",
+        "reference": "reply-7",
+    }
