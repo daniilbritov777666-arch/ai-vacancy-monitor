@@ -18,6 +18,21 @@ class BrowserOutreachRequest:
     days: int
 
 
+@dataclass(frozen=True)
+class BrowserConversationRequest:
+    order_id: str
+    channel: str
+    project_url: str
+
+
+@dataclass(frozen=True)
+class BrowserReplyRequest:
+    order_id: str
+    channel: str
+    project_url: str
+    message: str
+
+
 class MarketplaceBrowserClient:
     def __init__(
         self,
@@ -37,7 +52,23 @@ class MarketplaceBrowserClient:
         self.runner = runner
 
     def submit(self, request: BrowserOutreachRequest, *, artifacts_dir: Path) -> dict:
+        return self._run("submit_outreach", request, artifacts_dir=artifacts_dir)
+
+    def list_messages(self, request: BrowserConversationRequest, *, artifacts_dir: Path) -> dict:
+        return self._run("list_messages", request, artifacts_dir=artifacts_dir)
+
+    def send_reply(self, request: BrowserReplyRequest, *, artifacts_dir: Path) -> dict:
+        return self._run("send_reply", request, artifacts_dir=artifacts_dir)
+
+    def _run(
+        self,
+        operation: str,
+        request: BrowserOutreachRequest | BrowserConversationRequest | BrowserReplyRequest,
+        *,
+        artifacts_dir: Path,
+    ) -> dict:
         payload = {
+            "operation": operation,
             "request": asdict(request),
             "profile_dir": str(self.profile_dir),
             "artifacts_dir": str(artifacts_dir),
