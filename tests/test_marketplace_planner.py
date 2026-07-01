@@ -174,6 +174,8 @@ def test_marketplace_plan_reports_browser_dry_run_readiness(tmp_path):
         public_project_sources=["freelance_ru", "weblancer"],
         marketplace_browser_enabled=True,
         marketplace_browser_live_submit=False,
+        marketplace_browser_conversation_enabled=True,
+        marketplace_browser_reply_live=False,
         payment_instructions_ru="Оплата по СБП",
     )
 
@@ -187,8 +189,27 @@ def test_marketplace_plan_reports_browser_dry_run_readiness(tmp_path):
     assert freelance_ru.outreach == "browser_dry_run"
     assert weblancer.outreach == "browser_dry_run"
     assert pchel.outreach != "browser_dry_run"
+    assert fl_ru.conversation == "browser_conversation_dry_run"
+    assert freelance_ru.conversation == "browser_conversation_dry_run"
     assert any("вход" in blocker for blocker in freelance_ru.blockers)
     assert any("браузер" in action.lower() for action in plan.next_actions)
+
+
+def test_marketplace_plan_reports_platform_auto_only_with_live_outreach_and_reply(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        marketplace_browser_enabled=True,
+        marketplace_browser_live_submit=True,
+        marketplace_browser_conversation_enabled=True,
+        marketplace_browser_reply_live=True,
+        payment_instructions_ru="Оплата по СБП",
+    )
+
+    plan = build_marketplace_plan(config=config, public_health=[])
+
+    fl_ru = next(channel for channel in plan.channels if channel.key == "fl_ru")
+    assert fl_ru.outreach == "browser_auto"
+    assert fl_ru.conversation == "platform_auto"
 
 
 def test_write_marketplace_plan_report_outputs_json_and_markdown(tmp_path):

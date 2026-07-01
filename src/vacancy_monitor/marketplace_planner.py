@@ -143,7 +143,7 @@ def _fl_ru_channel(*, config: Config) -> MarketplaceChannel:
         name=capabilities.name,
         discovery="enabled" if configured else "disabled",
         outreach=browser_outreach,
-        conversation="manual",
+        conversation=_browser_conversation_mode(config) or "manual",
         payment=capabilities.payment,
         priority=capabilities.priority,
         blockers=blockers,
@@ -192,7 +192,11 @@ def _public_email_channel(
     outreach = browser_outreach or ("email_auto" if smtp_ready else "manual_or_email_only")
     if browser_outreach == "browser_dry_run":
         blockers.append("нужен одноразовый вход в браузерный профиль")
-    conversation = "email_auto" if imap_ready else "email_if_customer_replies"
+    conversation = (
+        _browser_conversation_mode(config)
+        if config.marketplace_browser_enabled and key in {"freelance_ru", "weblancer"}
+        else None
+    ) or ("email_auto" if imap_ready else "email_if_customer_replies")
     return MarketplaceChannel(
         key=key,
         name=capabilities.name,
@@ -243,7 +247,7 @@ def _next_actions(
         actions.append("Войти в аккаунты бирж в браузерном профиле и проверить dry-run форм отклика.")
     if not any(channel.outreach == "email_auto" for channel in channels):
         actions.append("Подключить SMTP, чтобы автоотклик работал для публичных проектов с опубликованным email.")
-    if not any(channel.conversation == "email_auto" for channel in channels):
+    if not any(channel.conversation in {"email_auto", "platform_auto"} for channel in channels):
         actions.append("Подключить IMAP, чтобы агент читал ответы заказчиков по email и продолжал цикл без ручного переноса.")
     if not rf_payment_channels:
         actions.append("Добавить PAYMENT_INSTRUCTIONS_RU для оплаты по СБП или настроить ЮKassa.")
@@ -254,6 +258,14 @@ def _browser_outreach_mode(config: Config) -> str:
     if not config.marketplace_browser_enabled:
         return "draft_only"
     return "browser_auto" if config.marketplace_browser_live_submit else "browser_dry_run"
+
+
+def _browser_conversation_mode(config: Config) -> str | None:
+    if not config.marketplace_browser_enabled or not config.marketplace_browser_conversation_enabled:
+        return None
+    if config.marketplace_browser_live_submit and config.marketplace_browser_reply_live:
+        return "platform_auto"
+    return "browser_conversation_dry_run"
 
 
 def _is_ready_channel(channel: MarketplaceChannel) -> bool:
