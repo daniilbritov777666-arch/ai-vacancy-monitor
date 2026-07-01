@@ -68,6 +68,7 @@ from vacancy_monitor.job_worker import (
     write_queue_health,
 )
 from vacancy_monitor.marketplace_planner import build_marketplace_plan, write_marketplace_plan_report
+from vacancy_monitor.marketplace_browser import BrowserOutreachRequest, MarketplaceBrowserClient
 from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_run_report import write_order_run_report
 from vacancy_monitor.order_store import OrderStore
@@ -293,7 +294,7 @@ def run_local_agent_once(
     )
     outreach_sender = send_outreach or (
         (lambda order, text: _send_marketplace_outreach(config, order, text))
-        if config.freelancehunt_api_token or _email_sender_configured(config)
+        if config.freelancehunt_api_token or _email_sender_configured(config) or config.marketplace_browser_enabled
         else None
     )
 
@@ -2324,11 +2325,17 @@ def _maybe_auto_send_outreach(
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} пропущен: проект устарел.")
         return updated
     if order.contact and order.contact.channel == "platform_browser" and not order.contact.can_auto_send:
-        reason = f"браузерный адаптер {order.contact.value} не настроен"
-        updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
-        if _write_outreach_channel_blocked(store=store, order=updated, reason=reason):
-            _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: {reason}.")
-        return updated
+        if not config.marketplace_browser_enabled:
+            reason = f"браузерный адаптер {order.contact.value} не настроен"
+            updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
+            if _write_outreach_channel_blocked(store=store, order=updated, reason=reason):
+                _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: {reason}.")
+            return updated
+        if not config.marketplace_browser_live_submit:
+            reason = "браузерный адаптер работает в dry-run режиме"
+            if _write_outreach_channel_blocked(store=store, order=order, reason=reason):
+                _safe_notify(sender, f"Автоотклик по заказу {order.order_id} отложен: {reason}.")
+            return order
     if not order.contact or not order.contact.can_auto_send:
         updated = store.update_status(order.order_id, OrderStatus.CONTACT_UNAVAILABLE)
         _safe_notify(sender, f"Автоотклик по заказу {order.order_id} невозможен: контакт не опубликован.")
@@ -2832,7 +2839,7 @@ def run_local_agent_loop(
     offset: int | None = None
     send_outreach = (
         (lambda order, text: _send_marketplace_outreach(config, order, text))
-        if config.freelancehunt_api_token or _email_sender_configured(config)
+        if config.freelancehunt_api_token or _email_sender_configured(config) or config.marketplace_browser_enabled
         else None
     )
     send_delivery = (
@@ -2883,6 +2890,36 @@ def _send_marketplace_outreach(config: Config, order: Order, text: str) -> None:
             from_email=config.smtp_from,
             use_ssl=config.smtp_use_ssl,
         ).send(order, text)
+        return
+    if order.contact.channel == "platform_browser":
+        if not config.marketplace_browser_enabled or not config.marketplace_browser_live_submit:
+            raise RuntimeError("marketplace browser live submit is disabled")
+        client = MarketplaceBrowserClient(
+            profile_dir=config.marketplace_browser_profile_dir,
+            executable_path=config.marketplace_browser_executable_path,
+            headless=config.marketplace_browser_headless,
+            live_submit=config.marketplace_browser_live_submit,
+            timeout_seconds=config.marketplace_browser_timeout_seconds,
+        )
+        result = client.submit(
+            BrowserOutreachRequest(
+                order_id=order.order_id,
+                channel=order.contact.value,
+                project_url=order.source_url,
+                message=text,
+                amount_rub=order.price_rub or config.auto_max_price_rub,
+                days=3,
+            ),
+            artifacts_dir=config.orders_path / order.order_id / "outbox" / "browser",
+        )
+        result_path = config.orders_path / order.order_id / "outbox" / "browser_result.json"
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        result_path.write_text(
+            json.dumps({"checked_at": format_moscow_time(), **result}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if result.get("status") != "submitted" or result.get("submitted") is not True:
+            raise RuntimeError(f"marketplace browser submission failed: {result.get('status', 'unknown')}")
         return
     if order.contact.channel == "freelancehunt":
         if not config.freelancehunt_api_token:

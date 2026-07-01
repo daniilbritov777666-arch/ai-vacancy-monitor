@@ -310,6 +310,79 @@ def test_platform_browser_without_adapter_is_terminal_and_recorded(tmp_path):
     assert len(notifications) == 1
 
 
+def test_platform_browser_dry_run_mode_does_not_mark_outreach_sent(tmp_path):
+    notifications = []
+    config = replace(
+        make_config(tmp_path),
+        auto_outreach_enabled=True,
+        marketplace_browser_enabled=True,
+        marketplace_browser_live_submit=False,
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="weblancer.net",
+        post_id="weblancer:1268001",
+        url="https://www.weblancer.net/freelance/sozdanie-botov-61/telegram-bot-1268001/",
+        text="Разовый проект: Telegram-бот для заявок.",
+    )
+    order = replace(
+        make_order_from_post(post, category="Telegram-боты"),
+        status=OrderStatus.DRAFT_READY,
+    )
+    store.save_order(order)
+
+    updated = local_agent_cli._maybe_auto_send_outreach(
+        config=config,
+        order=order,
+        store=store,
+        sender=lambda text, reply_markup=None: notifications.append(text),
+        send_outreach=lambda order, text: (_ for _ in ()).throw(AssertionError("must not send")),
+    )
+
+    assert updated.status == OrderStatus.DRAFT_READY
+    assert "dry-run" in (
+        store.order_dir(order.order_id) / "outbox" / "channel_blocked.json"
+    ).read_text(encoding="utf-8")
+
+
+def test_send_marketplace_outreach_uses_browser_adapter_for_platform_contact(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeBrowserClient:
+        def __init__(self, **kwargs):
+            calls.append(("init", kwargs))
+
+        def submit(self, request, *, artifacts_dir):
+            calls.append(("submit", request, artifacts_dir))
+            return {"status": "submitted", "submitted": True, "reference": "response-1"}
+
+    monkeypatch.setattr(local_agent_cli, "MarketplaceBrowserClient", FakeBrowserClient)
+    config = replace(
+        make_config(tmp_path),
+        marketplace_browser_enabled=True,
+        marketplace_browser_live_submit=True,
+    )
+    post = Post(
+        source="freelance.ru",
+        post_id="freelance_ru:4171",
+        url="https://freelance.ru/task/view/4171",
+        text="Нужен Python-скрипт.",
+    )
+    order = replace(make_order_from_post(post, category="Автоматизации и парсеры"), price_rub=12000)
+
+    local_agent_cli._send_marketplace_outreach(config, order, "Здравствуйте! Готов выполнить задачу.")
+
+    request = calls[1][1]
+    assert request.channel == "freelance_ru"
+    assert request.amount_rub == 12000
+    assert calls[1][2] == config.orders_path / order.order_id / "outbox" / "browser"
+    result = json.loads(
+        (config.orders_path / order.order_id / "outbox" / "browser_result.json").read_text(encoding="utf-8")
+    )
+    assert result["status"] == "submitted"
+    assert result["reference"] == "response-1"
+
+
 def safe_autopilot_result() -> AutopilotResult:
     return AutopilotResult(
         safe_to_autopilot=True,

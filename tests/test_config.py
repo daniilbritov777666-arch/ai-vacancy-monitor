@@ -27,6 +27,22 @@ def test_public_sources_read_env(monkeypatch):
     assert config.public_source_probes == ["workzilla"]
 
 
+def test_marketplace_browser_config_reads_safe_defaults_and_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")
+    monkeypatch.setenv("MARKETPLACE_BROWSER_ENABLED", "true")
+    monkeypatch.setenv("MARKETPLACE_BROWSER_PROFILE_DIR", str(tmp_path / "profile"))
+    monkeypatch.setenv("MARKETPLACE_BROWSER_EXECUTABLE_PATH", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    monkeypatch.setenv("MARKETPLACE_BROWSER_HEADLESS", "false")
+
+    config = Config.from_env()
+
+    assert config.marketplace_browser_enabled is True
+    assert config.marketplace_browser_live_submit is False
+    assert config.marketplace_browser_profile_dir == tmp_path / "profile"
+    assert config.marketplace_browser_headless is False
+
+
 def test_autopilot_config_defaults(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "150761046")

@@ -35,6 +35,12 @@ class Config:
     freelancehunt_api_pages: int = 1
     freelancehunt_api_skill_ids: list[int] = field(default_factory=list)
     freelancehunt_bid_api_enabled: bool = False
+    marketplace_browser_enabled: bool = False
+    marketplace_browser_live_submit: bool = False
+    marketplace_browser_profile_dir: Path = Path.home() / ".codex" / "marketplace-browser-profile"
+    marketplace_browser_executable_path: str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    marketplace_browser_headless: bool = False
+    marketplace_browser_timeout_seconds: int = 90
     auto_outreach_enabled: bool = False
     auto_outreach_daily_limit: int = 3
     auto_outreach_max_age_hours: int = 24
@@ -159,6 +165,23 @@ class Config:
         freelancehunt_api_pages = min(5, max(1, int(os.environ.get("FREELANCEHUNT_API_PAGES", "1"))))
         freelancehunt_api_skill_ids = _positive_int_csv(os.environ.get("FREELANCEHUNT_API_SKILL_IDS"))
         freelancehunt_bid_api_enabled = _env_bool("FREELANCEHUNT_BID_API_ENABLED")
+        marketplace_browser_enabled = _env_bool("MARKETPLACE_BROWSER_ENABLED")
+        marketplace_browser_live_submit = _env_bool("MARKETPLACE_BROWSER_LIVE_SUBMIT")
+        marketplace_browser_profile_dir = Path(
+            os.environ.get(
+                "MARKETPLACE_BROWSER_PROFILE_DIR",
+                str(Path.home() / ".codex" / "marketplace-browser-profile"),
+            )
+        ).expanduser()
+        marketplace_browser_executable_path = os.environ.get(
+            "MARKETPLACE_BROWSER_EXECUTABLE_PATH",
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ).strip()
+        marketplace_browser_headless = _env_bool("MARKETPLACE_BROWSER_HEADLESS")
+        marketplace_browser_timeout_seconds = min(
+            300,
+            max(30, int(os.environ.get("MARKETPLACE_BROWSER_TIMEOUT_SECONDS", "90"))),
+        )
         auto_outreach_enabled = _env_bool("AUTO_OUTREACH_ENABLED", default=autonomous_default)
         auto_outreach_daily_limit = int(os.environ.get("AUTO_OUTREACH_DAILY_LIMIT", "3"))
         auto_outreach_max_age_hours = int(os.environ.get("AUTO_OUTREACH_MAX_AGE_HOURS", "24"))
@@ -221,6 +244,12 @@ class Config:
             freelancehunt_api_pages=freelancehunt_api_pages,
             freelancehunt_api_skill_ids=freelancehunt_api_skill_ids,
             freelancehunt_bid_api_enabled=freelancehunt_bid_api_enabled,
+            marketplace_browser_enabled=marketplace_browser_enabled,
+            marketplace_browser_live_submit=marketplace_browser_live_submit,
+            marketplace_browser_profile_dir=marketplace_browser_profile_dir,
+            marketplace_browser_executable_path=marketplace_browser_executable_path,
+            marketplace_browser_headless=marketplace_browser_headless,
+            marketplace_browser_timeout_seconds=marketplace_browser_timeout_seconds,
             auto_outreach_enabled=auto_outreach_enabled,
             auto_outreach_daily_limit=auto_outreach_daily_limit,
             auto_outreach_max_age_hours=auto_outreach_max_age_hours,

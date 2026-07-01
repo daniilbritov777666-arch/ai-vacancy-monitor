@@ -19,6 +19,10 @@ set_env() {
 
 set_env RSS_FEEDS "https://www.fl.ru/rss/projects.xml"
 set_env PUBLIC_PROJECT_SOURCES "freelance_ru,pchel,weblancer"
+set_env MARKETPLACE_BROWSER_ENABLED "true"
+set_env MARKETPLACE_BROWSER_LIVE_SUBMIT "false"
+set_env MARKETPLACE_BROWSER_PROFILE_DIR "$HOME/.codex/marketplace-browser-profile"
+set_env MARKETPLACE_BROWSER_HEADLESS "false"
 set_env PUBLIC_SOURCE_PROBES "kwork,workzilla"
 set_env FREELANCEHUNT_API_SOURCE_ENABLED "false"
 set_env FREELANCEHUNT_BID_API_ENABLED "false"
