@@ -132,16 +132,22 @@ def format_marketplace_plan(plan: MarketplaceAutopilotPlan) -> str:
 def _fl_ru_channel(*, config: Config) -> MarketplaceChannel:
     capabilities = CHANNELS["fl_ru"]
     configured = any("fl.ru" in feed for feed in config.rss_feeds)
+    browser_outreach = _browser_outreach_mode(config)
+    blockers = []
+    if browser_outreach == "browser_dry_run":
+        blockers.append("нужен одноразовый вход в браузерный профиль")
+    elif browser_outreach == "draft_only":
+        blockers.append("браузерный адаптер отключен")
     return MarketplaceChannel(
         key=capabilities.key,
         name=capabilities.name,
         discovery="enabled" if configured else "disabled",
-        outreach="draft_only",
+        outreach=browser_outreach,
         conversation="manual",
         payment=capabilities.payment,
         priority=capabilities.priority,
-        blockers=["нет подтвержденного API автооткликов"],
-        notes_ru="Используется как источник проектов через RSS без имитации браузера.",
+        blockers=blockers,
+        notes_ru="Поиск через RSS, отклик через изолированный браузерный профиль.",
     )
 
 
@@ -178,7 +184,14 @@ def _public_email_channel(
         if imap_ready and not email_health.imap_reachable:
             blockers.append(f"IMAP недоступен: {email_health.imap_error or 'connection failed'}")
             imap_ready = False
-    outreach = "email_auto" if smtp_ready else "manual_or_email_only"
+    browser_outreach = (
+        _browser_outreach_mode(config)
+        if config.marketplace_browser_enabled and key in {"freelance_ru", "weblancer"}
+        else None
+    )
+    outreach = browser_outreach or ("email_auto" if smtp_ready else "manual_or_email_only")
+    if browser_outreach == "browser_dry_run":
+        blockers.append("нужен одноразовый вход в браузерный профиль")
     conversation = "email_auto" if imap_ready else "email_if_customer_replies"
     return MarketplaceChannel(
         key=key,
@@ -226,6 +239,8 @@ def _next_actions(
     env: Mapping[str, str],
 ) -> list[str]:
     actions: list[str] = []
+    if any(channel.outreach == "browser_dry_run" for channel in channels):
+        actions.append("Войти в аккаунты бирж в браузерном профиле и проверить dry-run форм отклика.")
     if not any(channel.outreach == "email_auto" for channel in channels):
         actions.append("Подключить SMTP, чтобы автоотклик работал для публичных проектов с опубликованным email.")
     if not any(channel.conversation == "email_auto" for channel in channels):
@@ -233,6 +248,12 @@ def _next_actions(
     if not rf_payment_channels:
         actions.append("Добавить PAYMENT_INSTRUCTIONS_RU для оплаты по СБП или настроить ЮKassa.")
     return actions
+
+
+def _browser_outreach_mode(config: Config) -> str:
+    if not config.marketplace_browser_enabled:
+        return "draft_only"
+    return "browser_auto" if config.marketplace_browser_live_submit else "browser_dry_run"
 
 
 def _is_ready_channel(channel: MarketplaceChannel) -> bool:
