@@ -189,6 +189,7 @@ def run_local_agent_once(
     process_jobs: bool = True,
 ) -> MonitorSummary:
     store = OrderStore(config.orders_path)
+    _retire_disabled_marketplace_orders(config=config, store=store)
     if config.execution_verify_enabled:
         try:
             write_execution_runtime_health(
@@ -518,6 +519,24 @@ def _reconcile_agent_jobs(*, config: Config, store: OrderStore, queue: AgentJobQ
                 now=datetime.now(tz=UTC),
             )
             _enqueue_advance_order(config=config, queue=queue, order=order)
+
+
+def _retire_disabled_marketplace_orders(*, config: Config, store: OrderStore) -> None:
+    freelancehunt_enabled = bool(config.freelancehunt_api_token) or config.freelancehunt_api_source_enabled or any(
+        "freelancehunt.com" in feed for feed in config.rss_feeds
+    )
+    if freelancehunt_enabled:
+        return
+    retireable = {
+        OrderStatus.AWAITING_RESPONSE_APPROVAL,
+        OrderStatus.DRAFT_READY,
+        OrderStatus.SEND_FAILED,
+    }
+    for order in store.list_orders():
+        if order.status not in retireable:
+            continue
+        if "freelancehunt" in order.source.lower() or "freelancehunt.com" in order.source_url.lower():
+            store.save_order(replace(order, status=OrderStatus.SKIPPED, updated_at=format_moscow_time()))
 
 
 def _process_agent_jobs(

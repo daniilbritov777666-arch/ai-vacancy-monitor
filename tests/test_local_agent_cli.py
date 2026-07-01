@@ -3105,6 +3105,38 @@ def test_run_local_agent_processes_existing_pending_order_after_restart(tmp_path
     assert (store.order_dir(order.order_id) / "autopilot" / "analysis.json").exists()
 
 
+def test_run_local_agent_retires_disabled_freelancehunt_order_without_ai(tmp_path):
+    config = replace(
+        make_config(tmp_path),
+        auto_mode="autopilot",
+        openai_api_key="sk-test",
+        freelancehunt_api_source_enabled=False,
+        rss_feeds=["https://www.fl.ru/rss/projects.xml"],
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelancehunt.com/projects.rss",
+        post_id="freelancehunt.com/projects.rss:https://freelancehunt.com/project/bot/1639000.html",
+        url="https://freelancehunt.com/project/bot/1639000.html",
+        text="Нужен Telegram-бот, бюджет 12 000 руб.",
+    )
+    order = make_order_from_post(post, category="Telegram-боты", risks=[])
+    store.save_order(order)
+    client = FakeAutopilotClient(safe_autopilot_result())
+
+    run_local_agent_once(
+        config,
+        fetch_posts=lambda channel: [],
+        fetch_rss_posts=lambda feed: [],
+        send_message=lambda text, reply_markup=None: None,
+        autopilot_client=client,
+    )
+
+    assert store.load_order(order.order_id).status == OrderStatus.SKIPPED
+    assert client.orders == []
+    assert not (store.order_dir(order.order_id) / "autopilot" / "analysis.json").exists()
+
+
 def test_run_local_agent_skips_previously_analyzed_pending_order_in_autopilot(tmp_path):
     config = replace(make_config(tmp_path), auto_mode="autopilot", openai_api_key="sk-test")
     store = OrderStore(config.orders_path)
