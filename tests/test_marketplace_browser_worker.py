@@ -68,6 +68,8 @@ def test_supported_marketplaces_have_distinct_selector_contracts():
     assert selectors_for("fl_ru").login_url == "https://www.fl.ru/login/"
     assert selectors_for("freelance_ru").login_url == "https://freelance.ru/login/"
     assert selectors_for("weblancer").login_url == "https://www.weblancer.net/account/login/"
+    assert 'input[name="amount"]' in selectors_for("weblancer").amount
+    assert 'button[type="button"]' in selectors_for("weblancer").submit
 
 
 def test_dry_run_fills_and_screenshots_without_submit(tmp_path):
