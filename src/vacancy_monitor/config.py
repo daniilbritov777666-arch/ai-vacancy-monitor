@@ -41,6 +41,9 @@ class Config:
     marketplace_browser_executable_path: str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     marketplace_browser_headless: bool = False
     marketplace_browser_timeout_seconds: int = 90
+    marketplace_browser_conversation_enabled: bool = False
+    marketplace_browser_reply_live: bool = False
+    marketplace_browser_orders_per_cycle: int = 3
     auto_outreach_enabled: bool = False
     auto_outreach_daily_limit: int = 3
     auto_outreach_max_age_hours: int = 24
@@ -182,6 +185,12 @@ class Config:
             300,
             max(30, int(os.environ.get("MARKETPLACE_BROWSER_TIMEOUT_SECONDS", "90"))),
         )
+        marketplace_browser_conversation_enabled = _env_bool("MARKETPLACE_BROWSER_CONVERSATION_ENABLED")
+        marketplace_browser_reply_live = _env_bool("MARKETPLACE_BROWSER_REPLY_LIVE")
+        marketplace_browser_orders_per_cycle = min(
+            20,
+            max(1, int(os.environ.get("MARKETPLACE_BROWSER_ORDERS_PER_CYCLE", "3"))),
+        )
         auto_outreach_enabled = _env_bool("AUTO_OUTREACH_ENABLED", default=autonomous_default)
         auto_outreach_daily_limit = int(os.environ.get("AUTO_OUTREACH_DAILY_LIMIT", "3"))
         auto_outreach_max_age_hours = int(os.environ.get("AUTO_OUTREACH_MAX_AGE_HOURS", "24"))
@@ -250,6 +259,9 @@ class Config:
             marketplace_browser_executable_path=marketplace_browser_executable_path,
             marketplace_browser_headless=marketplace_browser_headless,
             marketplace_browser_timeout_seconds=marketplace_browser_timeout_seconds,
+            marketplace_browser_conversation_enabled=marketplace_browser_conversation_enabled,
+            marketplace_browser_reply_live=marketplace_browser_reply_live,
+            marketplace_browser_orders_per_cycle=marketplace_browser_orders_per_cycle,
             auto_outreach_enabled=auto_outreach_enabled,
             auto_outreach_daily_limit=auto_outreach_daily_limit,
             auto_outreach_max_age_hours=auto_outreach_max_age_hours,

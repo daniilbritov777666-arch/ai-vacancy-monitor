@@ -68,7 +68,18 @@ from vacancy_monitor.job_worker import (
     write_queue_health,
 )
 from vacancy_monitor.marketplace_planner import build_marketplace_plan, write_marketplace_plan_report
-from vacancy_monitor.marketplace_browser import BrowserOutreachRequest, MarketplaceBrowserClient
+from vacancy_monitor.marketplace_browser import (
+    BrowserConversationRequest,
+    BrowserOutreachRequest,
+    BrowserReplyRequest,
+    MarketplaceBrowserClient,
+)
+from vacancy_monitor.marketplace_conversation import (
+    MarketplaceMessage,
+    sync_marketplace_messages,
+    write_marketplace_reply_draft,
+    write_marketplace_reply_sent_record,
+)
 from vacancy_monitor.order_models import MOSCOW_TZ, Order, OrderStatus, format_moscow_time
 from vacancy_monitor.order_run_report import write_order_run_report
 from vacancy_monitor.order_store import OrderStore
@@ -184,6 +195,7 @@ def run_local_agent_once(
     send_payment_reminder: Callable[[Order, str], None] | None = None,
     freelancehunt_client: FreelancehuntConversationClient | None = None,
     email_inbound_client: EmailInboundClient | None = None,
+    marketplace_browser_client: MarketplaceBrowserClient | None = None,
     conversation_reply_client: ConversationReplyClient | None = None,
     execution_draft_client: ExecutionDraftClient | None = None,
     probe_email_transport_func: Callable[[Config], EmailTransportHealth] = probe_email_transport,
@@ -401,6 +413,13 @@ def run_local_agent_once(
         execution_draft_client=execution_draft_client,
         send_email=outreach_sender,
         send_delivery=send_delivery,
+    )
+    _sync_marketplace_browser_conversations(
+        config=config,
+        store=store,
+        sender=sender,
+        browser_client=marketplace_browser_client,
+        conversation_reply_client=conversation_reply_client,
     )
     _sync_freelancehunt_bids(
         config=config,
@@ -1203,6 +1222,156 @@ def _sync_email_conversations(
             execution_draft_client=draft_client,
             send_delivery=send_delivery or send_email,
         )
+
+
+def _sync_marketplace_browser_conversations(
+    *,
+    config: Config,
+    store: OrderStore,
+    sender: Callable[..., None],
+    browser_client: MarketplaceBrowserClient | None = None,
+    conversation_reply_client: ConversationReplyClient | None = None,
+) -> None:
+    if not (
+        config.auto_conversation_enabled
+        and config.marketplace_browser_enabled
+        and config.marketplace_browser_conversation_enabled
+    ):
+        return
+    client = browser_client or MarketplaceBrowserClient(
+        profile_dir=config.marketplace_browser_profile_dir,
+        executable_path=config.marketplace_browser_executable_path,
+        headless=config.marketplace_browser_headless,
+        live_submit=config.marketplace_browser_reply_live,
+        timeout_seconds=config.marketplace_browser_timeout_seconds,
+    )
+    reply_client = conversation_reply_client
+    if reply_client is None and config.openai_api_key:
+        reply_client = OpenAIResponsesClient(
+            api_key=config.openai_api_key,
+            model=config.openai_model,
+            base_url=config.openai_base_url,
+        )
+    active_statuses = {
+        OrderStatus.OUTREACH_SENT,
+        OrderStatus.DISCOVERY,
+        OrderStatus.DRAFT_READY,
+        OrderStatus.AWAITING_TERMS_APPROVAL,
+        OrderStatus.PAYMENT_REQUESTED,
+    }
+    candidates = [
+        order
+        for order in store.list_orders()
+        if order.status in active_statuses
+        and order.contact is not None
+        and order.contact.channel == "platform_browser"
+    ][: config.marketplace_browser_orders_per_cycle]
+    for order in candidates:
+        order_dir = store.order_dir(order.order_id)
+        artifacts_dir = order_dir / "outbox" / "browser" / "conversation"
+        try:
+            result = client.list_messages(
+                BrowserConversationRequest(
+                    order_id=order.order_id,
+                    channel=order.contact.value,
+                    project_url=order.source_url,
+                ),
+                artifacts_dir=artifacts_dir,
+            )
+            _write_browser_conversation_result(order_dir=order_dir, result=result)
+        except Exception as exc:
+            _write_browser_conversation_result(
+                order_dir=order_dir,
+                result={"status": "worker_error", "error_type": type(exc).__name__},
+            )
+            continue
+        if result.get("status") != "messages_read" or not isinstance(result.get("messages"), list):
+            continue
+        normalized = []
+        for item in result["messages"]:
+            if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+                continue
+            normalized.append(
+                MarketplaceMessage(
+                    message_id=item.get("message_id"),
+                    author=str(item.get("author") or "customer"),
+                    text=item["text"],
+                    created_at=item.get("created_at"),
+                )
+            )
+        new_messages = sync_marketplace_messages(
+            order_dir=order_dir,
+            channel=order.contact.value,
+            messages=normalized,
+        )
+        customer_messages = [message for message in new_messages if message.author == "customer" and message.text]
+        if not customer_messages or reply_client is None:
+            continue
+        if order.status == OrderStatus.OUTREACH_SENT:
+            order = store.update_status(order.order_id, OrderStatus.DISCOVERY)
+        thread_messages = [
+            FreelancehuntThreadMessage(
+                message_id=message.message_id or "",
+                text=message.text,
+                created_at=message.created_at,
+                author_id=None,
+                author_type="customer",
+                is_own=False,
+                raw={"channel": order.contact.value},
+            )
+            for message in customer_messages
+        ]
+        try:
+            reply_text = reply_client.draft_thread_reply(order, thread_messages)
+            write_marketplace_reply_draft(
+                order_dir=order_dir,
+                channel=order.contact.value,
+                reply_text=reply_text,
+            )
+        except Exception:
+            continue
+        block_reason = _auto_reply_block_reason(
+            config=config,
+            store=store,
+            order=order,
+            messages=thread_messages,
+            reply_text=reply_text,
+        )
+        if not config.auto_reply_enabled or block_reason:
+            continue
+        try:
+            reply_result = client.send_reply(
+                BrowserReplyRequest(
+                    order_id=order.order_id,
+                    channel=order.contact.value,
+                    project_url=order.source_url,
+                    message=reply_text,
+                ),
+                artifacts_dir=artifacts_dir,
+            )
+            _write_browser_conversation_result(order_dir=order_dir, result=reply_result)
+        except Exception as exc:
+            _write_browser_conversation_result(
+                order_dir=order_dir,
+                result={"status": "worker_error", "error_type": type(exc).__name__},
+            )
+            continue
+        if reply_result.get("status") == "reply_submitted" and reply_result.get("submitted") is True:
+            write_marketplace_reply_sent_record(
+                order_dir=order_dir,
+                channel=order.contact.value,
+                reply_text=reply_text,
+                reference=reply_result.get("reference"),
+            )
+
+
+def _write_browser_conversation_result(*, order_dir, result: dict) -> None:
+    path = order_dir / "outbox" / "browser_conversation_result.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"checked_at": format_moscow_time(), **result}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _maybe_record_customer_payment_signal(

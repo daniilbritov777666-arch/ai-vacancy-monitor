@@ -1486,6 +1486,57 @@ def test_run_local_agent_auto_sends_safe_email_reply(tmp_path):
     assert any("AI-ответ отправлен заказчику по email" in message for message, _ in sent)
 
 
+def test_sync_marketplace_browser_conversation_writes_dry_run_reply(tmp_path):
+    class FakeBrowserClient:
+        def __init__(self):
+            self.replies = []
+
+        def list_messages(self, request, *, artifacts_dir):
+            return {
+                "status": "messages_read",
+                "messages": [
+                    {"message_id": "m-1", "author": "customer", "text": "Когда начнете?", "created_at": None}
+                ],
+            }
+
+        def send_reply(self, request, *, artifacts_dir):
+            self.replies.append(request.message)
+            return {"status": "reply_dry_run", "submitted": False}
+
+    browser = FakeBrowserClient()
+    config = replace(
+        make_config(tmp_path),
+        marketplace_browser_enabled=True,
+        marketplace_browser_conversation_enabled=True,
+        marketplace_browser_reply_live=False,
+        auto_conversation_enabled=True,
+        auto_reply_enabled=True,
+    )
+    store = OrderStore(config.orders_path)
+    post = Post(
+        source="freelance.ru",
+        post_id="freelance_ru:4171",
+        url="https://freelance.ru/task/view/4171",
+        text="Нужен Python-скрипт.",
+    )
+    order = replace(make_order_from_post(post, category="Автоматизации"), status=OrderStatus.OUTREACH_SENT)
+    store.save_order(order)
+
+    local_agent_cli._sync_marketplace_browser_conversations(
+        config=config,
+        store=store,
+        sender=lambda text, reply_markup=None: None,
+        browser_client=browser,
+        conversation_reply_client=FakeConversationReplyClient("Начну сегодня."),
+    )
+
+    order_dir = store.order_dir(order.order_id)
+    assert "Когда начнете?" in (order_dir / "conversation.md").read_text(encoding="utf-8")
+    assert (order_dir / "outbox" / "platform_reply_freelance_ru.md").exists()
+    assert browser.replies == ["Начну сегодня."]
+    assert not (order_dir / "outbox" / "platform_reply_freelance_ru.sent.json").exists()
+
+
 def test_run_local_agent_skips_email_sync_when_imap_transport_is_unreachable(tmp_path):
     sent = []
     config = replace(
